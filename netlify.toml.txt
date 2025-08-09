@@ -1,6 +1,5 @@
-[functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"
-
 [build]
-  publish = "."   # carpeta que contiene tu index.html
+  functions = "netlify/functions"
+  publish = "dist" # o la carpeta donde generas tu build
+
+

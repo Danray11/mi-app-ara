@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
 
+  <!-- Librerías -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.5.136/pdf.min.js"></script>
   <script>
@@ -33,11 +34,7 @@
     .brand{display:flex;align-items:center;gap:12px}
     .brand img{height:44px;width:auto;display:block}
     .brand h1{margin:0;font-size:20px;font-weight:700;letter-spacing:.2px}
-    .actions{display:flex;gap:10px;align-items:center}
-    .badge{padding:8px 12px;border:1px solid rgba(255,255,255,.35);border-radius:999px;background:rgba(255,255,255,.18);}
-    .btn-ghost{cursor:pointer}
     .container{max-width:1100px;margin:22px auto;padding:0 16px}
-
     .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow);margin-bottom:16px}
     label{font-weight:600;margin:8px 0 6px;display:block}
     input[type="file"],input[type="text"],select,button{
@@ -56,40 +53,68 @@
     #pdfViewer{min-height:65vh;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:10px}
     #pdfViewer canvas{display:block;margin:12px auto;max-width:100%;height:auto}
     .small{font-size:12px;color:var(--muted)}
+    .ok{color:#2BB673}.bad{color:#ED1C24}
   </style>
 </head>
 <body>
 
   <header>
     <div class="brand">
-      <!-- Usa el archivo con este nombre exacto, junto al index.html -->
       <img src="Logo_ARA.png" alt="ARA" />
       <h1>Biblioteca de PDFs por SAP</h1>
-    </div>
-    <div class="actions">
-      <span id="roleBadge" class="badge">Rol: —</span>
-      <button id="switchRole" class="badge btn-ghost">Cambiar rol</button>
     </div>
   </header>
 
   <main class="container">
-    <!-- ADMIN -->
-    <section class="card" id="adminBlock">
+    <!-- ESTADO EN LA NUBE -->
+    <section class="card">
       <div class="row">
         <div>
-          <label>Cargar Excel (solo Administrador)</label>
-          <input type="file" id="excelFile" accept=".xlsx,.xls" />
-          <div id="excelHint" class="small"></div>
+          <label>Estado de datos en la nube</label>
+          <div id="excelStatus" class="small">Excel: comprobando…</div>
+          <div id="pdfBaseStatus" class="small">Carpeta PDFs en nube: <code id="pdfBasePath">…</code></div>
         </div>
-        <div>
-          <label>Seleccionar carpeta con PDFs (solo Administrador)</label>
-          <input type="file" id="pdfFolder" webkitdirectory directory multiple />
-          <div id="pdfHint" class="small"></div>
+        <div style="max-width:220px">
+          <label>&nbsp;</label>
+          <button id="retryCloud" class="btn-primary">Reintentar carga</button>
         </div>
       </div>
     </section>
 
-    <!-- COMÚN -->
+    <!-- ADMIN: CARGAR LOCAL + PUBLICAR -->
+    <section class="card">
+      <h3 style="margin:0 0 10px 0;font-size:16px">Administrador — Cargar local y publicar en la nube</h3>
+      <div class="row">
+        <div>
+          <label>Cargar Excel (local)</label>
+          <input type="file" id="excelFile" accept=".xlsx,.xls" />
+          <div id="excelHint" class="small"></div>
+        </div>
+        <div>
+          <label>Seleccionar carpeta con PDFs (local)</label>
+          <input type="file" id="pdfFolder" webkitdirectory directory multiple />
+          <div id="pdfHint" class="small"></div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label>Ruta Excel en repo</label>
+          <input id="cloudExcelPath" type="text" value="data/Layout.xlsx" />
+        </div>
+        <div>
+          <label>Carpeta PDFs en repo</label>
+          <input id="cloudPdfBase" type="text" value="pdfs/" />
+        </div>
+        <div style="max-width:220px">
+          <label>&nbsp;</label>
+          <button id="publishBtn" class="btn-primary">Publicar en la nube</button>
+        </div>
+      </div>
+      <div id="publishStatus" class="small" style="margin-top:8px"></div>
+    </section>
+
+    <!-- BÚSQUEDA -->
     <section class="card">
       <div class="row">
         <div>
@@ -110,154 +135,163 @@
       </div>
     </section>
 
+    <!-- VISOR -->
     <section id="pdfViewer" class="card">Sin documento</section>
   </main>
 
   <script>
-    /******** CONFIG ********/
-    const ADMIN_PIN = 'admin123'; // cámbialo si quieres
+    /******** CONFIG DE NUBE (GitHub Pages) ********/
+    // Cuando tengas tu repo público con Pages activo, cambia estas URLs:
+    const EXCEL_URLS = [
+      './data/Layout.xlsx',
+      './data/layout.xlsx'
+      // Ejemplo final: 'https://TU_USUARIO.github.io/TU_REPO/data/Layout.xlsx'
+    ];
+    const PDF_BASE_URL = './pdfs/'; // Ejemplo final: 'https://TU_USUARIO.github.io/TU_REPO/pdfs/'
 
     /******** HELPERS ********/
     const $ = (sel) => document.querySelector(sel);
-    const normalize = (s) => String(s||'')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-      .replace(/\.[^.]+$/,'')
-      .replace(/[\s_-]+/g,'')
-      .toLowerCase().trim();
+    const norm = (s) => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    const toBase = (s) => norm(s).replace(/\.[^/.]+$/,'');   // sin extensión
 
     /******** ESTADO ********/
-    let role = localStorage.getItem('pdfsap_role') || 'admin'; // empieza en admin para configurar
-    let excelData = [];  let headerRow = [];  let _col = {};
-    let pdfFiles = {};  let lastFile = null; let lastBlobURL = null;
+    let excelData = [];  let headerRow = [];  let COL = {};
+    let lastPdfUrl = null; let lastFileName = null;
 
-    /******** ROLES ********/
-    function applyRoleUI(){
-      const isAdmin = role === 'admin';
-      $('#roleBadge').textContent = 'Rol: ' + (isAdmin ? 'Administrador' : 'Tienda');
-      $('#adminBlock').style.display = isAdmin ? '' : 'none';
-      $('#excelFile').disabled = !isAdmin;
-      $('#pdfFolder').disabled = !isAdmin;
-    }
-    applyRoleUI();
+    // ======== CARGA EXCEL DESDE NUBE ========
+    async function tryLoadExcel(){
+      $('#excelStatus').textContent = 'Excel: comprobando…';
+      for (const url of EXCEL_URLS){
+        try{
+          const res = await fetch(url, { cache:'no-store' });
+          if(!res.ok) continue;
+          const arr = await res.arrayBuffer();
+          const wb = XLSX.read(new Uint8Array(arr), { type:'array' });
+          const sheet = wb.Sheets[wb.SheetNames[0]];
+          excelData = XLSX.utils.sheet_to_json(sheet, { header:1 }) || [];
+          if(!excelData.length) { $('#excelStatus').innerHTML = 'Excel: <span class="bad">hoja vacía</span>'; return false; }
 
-    $('#switchRole').addEventListener('click', ()=>{
-      if(role === 'admin'){
-        role = 'tienda';
-        localStorage.setItem('pdfsap_role', role);
-        applyRoleUI();
-      }else{
-        const pin = prompt('PIN de administrador:');
-        if(pin === ADMIN_PIN){
-          role = 'admin';
-          localStorage.setItem('pdfsap_role', role);
-          applyRoleUI();
-        }else if(pin!==null){
-          alert('PIN incorrecto');
-        }
+          headerRow = (excelData[0]||[]).map(h => (h||'').toString().trim());
+          COL = {
+            REGION:    headerRow.findIndex(h => /REGIÓN|REGION/i.test(h)),
+            Z:         headerRow.findIndex(h => /^Z$/i.test(h)),
+            SAP:       headerRow.findIndex(h => /^SAP$/i.test(h)),
+            SURTIDO:   headerRow.findIndex(h => /^SURTIDO$/i.test(h)),
+            TIPOLOGIA: headerRow.findIndex(h => /^TIPOLOGIA$/i.test(h))
+          };
+          if (COL.TIPOLOGIA < 0) { $('#excelStatus').innerHTML = 'Excel: <span class="bad">falta columna TIPOLOGIA</span>'; return false; }
+
+          const cats = headerRow.slice(COL.TIPOLOGIA+1).filter(Boolean);
+          $('#categorySelect').innerHTML = '<option value="">—</option>' + cats.map(c => `<option value="${c}">${c}</option>`).join('');
+          $('#excelStatus').innerHTML = `Excel: <span class="ok">cargado</span> (${cats.length} categorías)`;
+          return true;
+        }catch(e){ /* intenta siguiente URL */ }
       }
+      $('#excelStatus').innerHTML = 'Excel: <span class="bad">no encontrado</span>. Publica <code>data/Layout.xlsx</code>.';
+      return false;
+    }
+
+    // ======== ADMIN: CARGAR LOCAL (para publicar) ========
+    document.getElementById('excelFile').addEventListener('change', (e)=>{
+      const f = e.target.files?.[0];
+      document.getElementById('excelHint').textContent = f ? `Excel local: ${f.name}` : '';
     });
 
-    /******** EVENTOS ********/
-    $('#excelFile').addEventListener('change', handleExcel);
-    $('#pdfFolder').addEventListener('change', handlePDFFolder);
-    $('#searchBtn').addEventListener('click', searchPDF);
-    $('#openNewTab').addEventListener('click', ()=>{ if(lastBlobURL) window.open(lastBlobURL,'_blank','noopener'); });
-    $('#downloadBtn').addEventListener('click', ()=>{
-      if(!lastFile) return;
-      const url = lastBlobURL || URL.createObjectURL(lastFile);
-      const a=document.createElement('a'); a.href=url; a.download=lastFile.name; a.click();
+    document.getElementById('pdfFolder').addEventListener('change', (e)=>{
+      const files = Array.from(e.target.files||[]).filter(f => /\.pdf$/i.test(f.name.trim()));
+      document.getElementById('pdfHint').textContent = files.length ? `${files.length} PDF(s) listos para publicar` : '';
     });
 
-    /******** EXCEL ********/
-    function handleExcel(evt){
-      const file = evt.target.files[0]; if(!file) return;
-      const reader = new FileReader();
-      reader.onload = (e)=>{
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data,{type:'array'});
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        excelData = XLSX.utils.sheet_to_json(sheet,{header:1}) || [];
-        if(!excelData.length){ $('#excelHint').textContent = 'Hoja vacía.'; $('#categorySelect').innerHTML='<option value=\"\">—</option>'; return; }
+    // ======== PUBLICAR EN LA NUBE (Netlify Function) ========
+    async function publishToCloud(){
+      const excelInput = document.getElementById('excelFile');
+      const pdfInput   = document.getElementById('pdfFolder');
+      const excelPath  = document.getElementById('cloudExcelPath').value || 'data/Layout.xlsx';
+      const pdfBase    = document.getElementById('cloudPdfBase').value || 'pdfs/';
+      const statusEl   = document.getElementById('publishStatus');
 
-        headerRow = (excelData[0]||[]).map(h => (h||'').toString().trim());
-        _col = {
-          REGION:    headerRow.findIndex(h => /REGIÓN|REGION/i.test(h)),
-          Z:         headerRow.findIndex(h => /^Z$/i.test(h)),
-          SAP:       headerRow.findIndex(h => /^SAP$/i.test(h)),
-          SURTIDO:   headerRow.findIndex(h => /^SURTIDO$/i.test(h)),
-          TIPOLOGIA: headerRow.findIndex(h => /^TIPOLOGIA$/i.test(h))
-        };
-        if(_col.TIPOLOGIA<0){ $('#excelHint').textContent='Falta columna TIPOLOGIA.'; $('#categorySelect').innerHTML='<option value=\"\">—</option>'; return; }
-
-        const cats = headerRow.slice(_col.TIPOLOGIA+1).filter(Boolean);
-        $('#categorySelect').innerHTML = '<option value=\"\">—</option>' + cats.map(c=>`<option value=\"${c}\">${c}</option>`).join('');
-        $('#excelHint').textContent = '';
-      };
-      reader.readAsArrayBuffer(file);
-    }
-
-    /******** PDFs ********/
-    function handlePDFFolder(evt){
-      const files = Array.from(evt.target.files||[]);
-      pdfFiles = {};
-      let matched = 0;
-      for(const file of files){
-        const byMime = (file.type||'').toLowerCase()==='application/pdf';
-        const byName = /\.pdf$/i.test(file.name.trim());
-        if(!(byMime||byName)) continue;
-        const base = file.name.trim().replace(/\.[^/.]+$/,'');
-        pdfFiles[base] = file;
-        pdfFiles['__norm__'+normalize(base)] = file;
-        matched++;
+      if (!pdfInput.files || pdfInput.files.length === 0) {
+        alert('Selecciona la carpeta de PDFs antes de publicar.');
+        return;
       }
-      $('#pdfHint').textContent = matched ? `${matched} PDF(s) indexados` : '';
+
+      statusEl.textContent = 'Preparando archivos…';
+
+      const form = new FormData();
+      if (excelInput.files && excelInput.files[0]) form.append('excel', excelInput.files[0], excelInput.files[0].name);
+      for (const f of Array.from(pdfInput.files)) form.append('pdfs', f, f.name);
+      form.append('excelPath', excelPath);
+      form.append('pdfBase', pdfBase);
+
+      try {
+        statusEl.textContent = 'Subiendo a la nube… (puede tardar)';
+        const res = await fetch('/.netlify/functions/publish', { method: 'POST', body: form });
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok || !data.ok) throw new Error(JSON.stringify(data));
+        statusEl.textContent = `Publicado: ${data.uploaded.length} archivo(s).`;
+
+        // Refresca el Excel desde la nube para que quede activo ya
+        await tryLoadExcel();
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = 'Error al publicar. Revisa la consola.';
+      }
     }
+    document.getElementById('publishBtn').addEventListener('click', (e)=>{ e.preventDefault(); publishToCloud(); });
 
-    /******** BÚSQUEDA ********/
-    async function searchPDF(){
-      if(!excelData.length) return alert('Primero carga el Excel (Administrador).');
-      const count = Object.keys(pdfFiles).filter(k=>!k.startsWith('__norm__')).length;
-      if(!count) return alert('Primero indexa la carpeta de PDFs (Administrador).');
-
-      const sap = $('#sapNumber').value?.toString().trim();
-      const category = $('#categorySelect').value;
+    // ======== BÚSQUEDA: SAP + Categoría (desde nube) ========
+    async function searchAndOpen(){
+      if(!excelData.length){ alert('El Excel en la nube no está disponible. Publica o reintenta.'); return; }
+      const sap = document.getElementById('sapNumber').value?.toString().trim();
+      const cat = document.getElementById('categorySelect').value;
       if(!sap) return alert('Ingresa SAP.');
-      if(!category) return alert('Selecciona una categoría.');
-      if(_col.SAP<0) return alert('No se encontró la columna SAP en el Excel.');
+      if(!cat) return alert('Selecciona una categoría.');
+      if(COL.SAP < 0) return alert('No se encontró la columna SAP en el Excel.');
 
-      const row = excelData.find((r,i)=> i>0 && String(r[_col.SAP])===sap);
+      const row = excelData.find((r,i)=> i>0 && String(r[COL.SAP])===sap);
       if(!row) return alert('SAP no encontrado en el Excel.');
 
-      const colIndex = headerRow.findIndex(h => String(h).trim()===category);
+      const colIndex = headerRow.findIndex(h => String(h).trim()===cat);
       if(colIndex<0) return alert('Categoría no encontrada en encabezados.');
 
-      const baseRaw = (row[colIndex]||'').toString().trim();
-      if(!baseRaw) return alert('La celda para esa categoría está vacía.');
+      const cellVal = (row[colIndex]||'').toString().trim();
+      if(!cellVal) return alert('La celda para esa categoría está vacía.');
 
-      const baseExact = baseRaw.replace(/\.[^/.]+$/,'');
-      const baseNorm  = normalize(baseExact);
+      const base = toBase(cellVal);
+      const candidates = [
+        PDF_BASE_URL + encodeURIComponent(base) + '.pdf',
+        PDF_BASE_URL + encodeURIComponent(cellVal)
+      ];
 
-      let file = pdfFiles[baseExact] || pdfFiles['__norm__'+baseNorm];
-      if(!file){
-        const keys = Object.keys(pdfFiles).filter(k=>!k.startsWith('__norm__'));
-        const candidates = keys.filter(k=> normalize(k).includes(baseNorm)).slice(0,12);
-        return alert(candidates.length ? 'No hubo match exacto. Sugerencias:\n'+candidates.join('\n')
-                                      : `No se encontró PDF: ${baseRaw}`);
+      let found = null, name = null;
+      for (const url of candidates){
+        try{
+          const head = await fetch(url, { method:'HEAD', cache:'no-store' });
+          if(head.ok){ found = url; name = decodeURIComponent(url.split('/').pop()); break; }
+        }catch(e){ /* sigue */ }
       }
 
-      await renderPDF(file);
+      if(!found){
+        alert(`No se encontró el PDF en la nube:\n- Esperado: ${PDF_BASE_URL}${base}.pdf`);
+        return;
+      }
+
+      lastPdfUrl = found;
+      lastFileName = name;
+      document.getElementById('currentName').textContent = name;
+      document.getElementById('openNewTab').disabled = false;
+      document.getElementById('downloadBtn').disabled = false;
+
+      await renderPdfFromUrl(found);
     }
+    document.getElementById('searchBtn').addEventListener('click', searchAndOpen);
 
-    /******** VISOR PDF + FALLBACK (sin duplicar botones) ********/
-    async function renderPDF(file){
-      const viewer = $('#pdfViewer');
+    // ======== RENDER PDF DESDE URL ========
+    async function renderPdfFromUrl(url){
+      const viewer = document.getElementById('pdfViewer');
       viewer.innerHTML = 'Cargando…';
-      if(lastBlobURL){ URL.revokeObjectURL(lastBlobURL); lastBlobURL=null; }
-      lastFile = file;
-
       try{
-        const data = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({data}).promise;
+        const pdf = await pdfjsLib.getDocument(url).promise;
         viewer.innerHTML = '';
         for(let n=1;n<=pdf.numPages;n++){
           const page = await pdf.getPage(n);
@@ -268,22 +302,28 @@
           await page.render({canvasContext:ctx, viewport}).promise;
           viewer.appendChild(canvas);
         }
-        // habilitar toolbar superior
-        $('#openNewTab').disabled = false;
-        $('#downloadBtn').disabled = false;
-        lastBlobURL = URL.createObjectURL(file);
-        $('#currentName').textContent = file.name;
       }catch(err){
         console.error('PDF.js error:', err);
-        // sin inyectar más botones: usamos los de la toolbar
-        lastBlobURL = URL.createObjectURL(file);
-        viewer.innerHTML = 'No se pudo mostrar el PDF aquí. Usa los botones de arriba para abrir o descargar.';
-        $('#openNewTab').disabled = false;
-        $('#downloadBtn').disabled = false;
-        $('#currentName').textContent = file.name;
+        viewer.innerHTML = 'No se pudo mostrar el PDF aquí. Usa los botones para abrir o descargar.';
       }
     }
+
+    // ======== BOTONES abrir/descargar ========
+    document.getElementById('openNewTab').addEventListener('click', ()=>{ if(lastPdfUrl) window.open(lastPdfUrl,'_blank','noopener'); });
+    document.getElementById('downloadBtn').addEventListener('click', ()=>{
+      if(!lastPdfUrl) return;
+      const a = document.createElement('a');
+      a.href = lastPdfUrl;
+      a.download = lastFileName || 'documento.pdf';
+      a.click();
+    });
+
+    // ======== REINTENTAR CARGA EN NUBE ========
+    document.getElementById('retryCloud').addEventListener('click', tryLoadExcel);
+
+    // Inicial
+    document.getElementById('pdfBasePath').textContent = PDF_BASE_URL;
+    tryLoadExcel();
   </script>
 </body>
 </html>
-

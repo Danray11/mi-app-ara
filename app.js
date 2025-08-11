@@ -174,3 +174,99 @@
   if (btnBuscar) btnBuscar.addEventListener('click', buscarPDF);
   init();
 })();
+// ===========================
+// BUSCAR PDF POR SAP/CATEGORÍA
+// ===========================
+(function wireBuscar() {
+  const $sap      = document.getElementById('inputSap');
+  const $cat      = document.getElementById('selectCategoria');
+  const $buscar   = document.getElementById('btnBuscar');
+  const $msg      = document.getElementById('visorMsg');
+  const $abrir    = document.getElementById('btnAbrirNueva');
+  const $desc     = document.getElementById('btnDescargar');
+
+  if (!$sap || !$cat || !$buscar || !$msg || !$abrir || !$desc) {
+    console.warn('[buscar] Faltan elementos del DOM. Revisa IDs en index.html');
+    return;
+  }
+
+  // Utilidad visual
+  function setMsg(texto, tipo = 'info') {
+    $msg.textContent = texto;
+    $msg.style.color = (tipo === 'error') ? '#b91c1c' : '#374151';
+  }
+  function showLinks(url) {
+    $abrir.href = url;
+    $desc.href  = url;
+    $abrir.style.display = 'inline-block';
+    $desc.style.display  = 'inline-block';
+  }
+  function hideLinks() {
+    $abrir.style.display = 'none';
+    $desc.style.display  = 'none';
+  }
+
+  // Click en "Buscar PDF"
+  $buscar.addEventListener('click', async () => {
+    hideLinks();
+
+    // Validaciones básicas
+    const sapVal = parseInt(($sap.value || '').trim(), 10);
+    if (!Number.isFinite(sapVal)) {
+      setMsg('Ingresa un SAP válido (número).', 'error');
+      $sap.focus();
+      return;
+    }
+    const catKey = ($cat.value || '').trim();
+    if (!catKey) {
+      setMsg('Selecciona una categoría.', 'error');
+      $cat.focus();
+      return;
+    }
+
+    if (!Array.isArray(window.DATA_ROWS) || window.DATA_ROWS.length === 0) {
+      setMsg('Aún no se han cargado los datos del Excel. Intenta “Reintentar carga”.', 'error');
+      return;
+    }
+
+    // Busca la fila por SAP (columna “SAP” del Excel)
+    const fila = window.DATA_ROWS.find(r => Number(r['SAP']) === sapVal);
+    if (!fila) {
+      setMsg(`No encontré filas para SAP ${sapVal} en ${window.URL_EXCEL || 'el Excel'}.`, 'error');
+      return;
+    }
+
+    // Toma el nombre del PDF desde la columna de la categoría
+    let nombre = (fila[catKey] || '').toString().trim();
+    if (!nombre) {
+      setMsg(`No hay nombre de archivo en la columna “${catKey}” para SAP ${sapVal}.`, 'error');
+      return;
+    }
+
+    // Asegura extensión .pdf
+    if (!/\.pdf$/i.test(nombre)) {
+      nombre += '.pdf';
+    }
+
+    // Construye la URL remota final
+    // (PDF_BASE ya es algo como: https://raw.githubusercontent.com/Danray11/ara-data/main/pdfs/)
+    const url = window.PDF_BASE + encodeURIComponent(nombre);
+
+    // (Opcional) Verifica que el archivo exista antes de mostrar links
+    try {
+      const head = await fetch(url, { method: 'HEAD' });
+      if (!head.ok) {
+        setMsg(`No se encontró el PDF en la nube: ${url}`, 'error');
+        return;
+      }
+    } catch (e) {
+      console.error('[buscar] Error verificando PDF:', e);
+      setMsg('Error verificando el PDF en la nube. Reintenta.', 'error');
+      return;
+    }
+
+    // Éxito
+    setMsg(`Listo: ${nombre}`);
+    showLinks(url);
+  });
+})();

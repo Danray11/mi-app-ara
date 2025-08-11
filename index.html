@@ -52,9 +52,15 @@
   <script src="env-gh.js"></script>
 
   <!-- Lógica principal: usa URL_EXCEL y PDF_BASE -->
-  <script defer src="app.js"></script>
-</head>
-<body>
+  
+ <!-- 1) Librería XLSX (defer) -->
+<script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<!-- 2) Config de entorno -->
+<script src="env-gh.js"></script>
+
+<!-- 3) Tu app (defer) -->
+<script defer src="app.js"></script>
 
   <header>
     <img src="Logo_ARA.png" alt="ARA" />
@@ -150,3 +156,4 @@
   </main>
 </body>
 </html>
+

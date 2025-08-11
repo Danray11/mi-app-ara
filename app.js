@@ -1,228 +1,215 @@
-// ===============================
-//  Utilidades DOM seguras
-// ===============================
-const $ = (id) => document.getElementById(id);
-const setText = (id, txt) => {
-  const el = $(id);
-  if (el) el.textContent = txt;
-  else console.warn(`[app] Falta el elemento #${id}`);
-};
-const setHTML = (id, html) => {
-  const el = $(id);
-  if (el) el.innerHTML = html;
-  else console.warn(`[app] Falta el elemento #${id}`);
-};
+/* app.js – versión estable y tolerante
+   - Lee el Excel desde URL_EXCEL (definida en env-gh.js)
+   - Usa encabezados de forma flexible (case-insensitive / sin acentos)
+   - No requiere cambiar tu Excel si ya funcionaba
+   - No rompe si faltan spans opcionales (#estado, #excelRemoto, #pdfsRemotos)
+*/
 
-// Logger
-const log = (...a) => console.log('[app]', ...a);
-const warn = (...a) => console.warn('[app]', ...a);
+(function () {
+  // ---------- Utilidades UI seguras ----------
+  const $ = (id) => document.getElementById(id) || null;
+  const setText = (id, txt) => { const el = $(id); if (el) el.textContent = txt; };
+  const show = (id) => { const el = $(id); if (el) el.style.display = ''; };
+  const hide = (id) => { const el = $(id); if (el) el.style.display = 'none'; };
 
-// ===============================
-//  Rutas base (inyectadas por env-gh.js)
-// ===============================
-const URL_EXCEL = window.URL_EXCEL || '';
-const PDF_BASE  = window.PDF_BASE  || '';
+  const log = (...a) => console.log('[app]', ...a);
+  const warn = (...a) => console.warn('[app]', ...a);
+  const err = (...a) => console.error('[app]', ...a);
 
-log('URL_EXCEL =>', URL_EXCEL);
-log('PDF_BASE  =>', PDF_BASE);
+  // ---------- Normalizadores ----------
+  // Normaliza claves (encabezados) para comparar sin acentos/espacios
+  const normKey = (s) =>
+    String(s || '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '')
+      .trim();
 
-// Mostrar en UI (si existen)
-setText('excelRemoto', URL_EXCEL || '(sin URL)');
-setText('pdfsRemotos', PDF_BASE  || '(sin URL)');
+  // Normaliza SAP (deja letras/números)
+  const normSap = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
 
-// ===============================
-//  Normalizador de headers
-// ===============================
-// Acepta varios alias para cada columna, así el Excel puede variar sin romper.
-const HEADERS_ALIASES = {
-  sap:       ['sap', 'codigo', 'codigosap', 'sku', 'id'],
-  categoria: ['categoria', 'category', 'tipo', 'grupo'],
-  archivo:   ['archivo', 'file', 'pdf', 'ruta', 'path', 'nombre', 'nombrearchivo']
-};
+  // ---------- Config que viene de env-gh.js ----------
+  const URL_EXCEL = window.URL_EXCEL || '';
+  const PDF_BASE  = window.PDF_BASE  || '';
 
-const norm = (s) => String(s || '').trim().toLowerCase();
+  // Si están los spans, muestro info
+  setText('excelRemoto', URL_EXCEL);
+  setText('pdfsRemotos', PDF_BASE);
 
-function detectHeaderIndexes(headerRow) {
-  // headerRow es un array (sheet_to_json con header:1)
-  const idx = { sap: -1, categoria: -1, archivo: -1 };
+  // ---------- Búsqueda tolerante de claves en objetos ----------
+  // Acepta varios alias y no depende de mayúsculas/acentos en el Excel
+  function findKey(obj, aliases) {
+    // Mapa normalizado -> clave real
+    const map = {};
+    Object.keys(obj).forEach(k => { map[normKey(k)] = k; });
 
-  headerRow.forEach((cell, i) => {
-    const h = norm(cell);
-    if (HEADERS_ALIASES.sap.includes(h))       idx.sap = (idx.sap === -1 ? i : idx.sap);
-    if (HEADERS_ALIASES.categoria.includes(h)) idx.categoria = (idx.categoria === -1 ? i : idx.categoria);
-    if (HEADERS_ALIASES.archivo.includes(h))   idx.archivo = (idx.archivo === -1 ? i : idx.archivo);
-  });
-
-  return idx;
-}
-
-// Construye una URL válida para PDFs incluso con subcarpetas/espacios
-function joinPdfUrl(base, relativePath) {
-  const segs = String(relativePath || '').split('/').map(encodeURIComponent);
-  let b = base.endsWith('/') ? base : base + '/';
-  return b + segs.join('/');
-}
-
-// ===============================
-//  Lectura de Excel (GitHub Raw)
-// ===============================
-async function cargarExcel() {
-  if (!URL_EXCEL) throw new Error('URL_EXCEL no está definida.');
-
-  setText('estado', 'Cargando…');
-
-  const resp = await fetch(URL_EXCEL, { cache: 'no-store' });
-  if (!resp.ok) throw new Error(`No se pudo obtener el Excel. HTTP ${resp.status}`);
-
-  const buf = await resp.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
-
-  const sheetName = wb.SheetNames[0];
-  const ws = wb.Sheets[sheetName];
-
-  // Leemos como matriz para detectar headers con flexibilidad
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
-  if (!rows.length) throw new Error('Hoja vacía.');
-  const headers = rows[0];
-
-  const idx = detectHeaderIndexes(headers);
-  log('Headers:', headers, 'Indexes:', idx);
-
-  if (idx.sap < 0 || idx.archivo < 0) {
-    throw new Error(
-      `No se detectaron las columnas mínimas. ` + 
-      `Requeridas: SAP y ARCHIVO. Alias soportados:\n` + 
-      `SAP = ${HEADERS_ALIASES.sap.join(', ')}\n` +
-      `ARCHIVO = ${HEADERS_ALIASES.archivo.join(', ')}\n` +
-      `CATEGORIA (opcional) = ${HEADERS_ALIASES.categoria.join(', ')}`
-    );
+    for (const alias of aliases) {
+      const nk = normKey(alias);
+      if (map[nk]) return map[nk];
+    }
+    return null;
   }
 
-  // Normalizamos filas a objetos {sap, categoria?, archivo}
-  const data = rows.slice(1)
-    .map(r => ({
-      sap:       norm(r[idx.sap]),
-      categoria: idx.categoria >= 0 ? String(r[idx.categoria]).trim() : '',
-      archivo:   String(r[idx.archivo]).trim()
-    }))
-    .filter(r => r.sap && r.archivo);
+  // ---------- Lectura Excel ----------
+  async function cargarExcel() {
+    if (!URL_EXCEL) throw new Error('URL_EXCEL no está definida.');
 
-  // Construir categorías únicas (si existen)
-  const categorias = Array.from(
-    new Set(data.map(r => r.categoria).filter(Boolean))
-  ).sort((a,b)=>a.localeCompare(b));
+    setText('estado', 'Cargando…');
 
-  log(`Leídas ${data.length} filas útiles. Categorías:`, categorias);
+    const resp = await fetch(URL_EXCEL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`No se pudo obtener el Excel. HTTP ${resp.status}`);
 
-  setText('estado', 'Datos cargados correctamente.');
-  return { data, categorias };
-}
+    const buf = await resp.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
 
-// ===============================
-//  UI: llenar combo, buscar, visor
-// ===============================
-function llenarCategorias(categorias) {
-  const sel = $('selectCategoria');
-  if (!sel) { warn('Falta #selectCategoria'); return; }
+    const sheetName = wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
 
-  sel.innerHTML = '';
-  const opt0 = document.createElement('option');
-  opt0.value = '';
-  opt0.textContent = '—';
-  sel.appendChild(opt0);
+    // Leemos a objetos (usa primera fila como encabezados)
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    log('Filas leídas:', rows.length);
 
-  categorias.forEach(cat => {
-    const o = document.createElement('option');
-    o.value = cat;
-    o.textContent = cat;
-    sel.appendChild(o);
-  });
-}
+    if (!rows.length) throw new Error('El Excel está vacío.');
 
-function mostrarResultado(url) {
-  // Muestra y configura los botones del visor
-  const abrir = $('btnAbrirNueva');
-  const down  = $('btnDescargar');
+    // Intentamos detectar claves con varios alias comunes
+    // (no cambies tu Excel: esto intenta adaptarse a lo que ya tenías)
+    const sample = rows[0];
+    const keySAP      = findKey(sample, ['sap', 'codigo', 'codigosap', 'sku', 'id']) || 'sap';
+    const keyArchivo  = findKey(sample, ['archivo', 'file', 'pdf', 'ruta', 'path', 'nombre', 'nombrearchivo']) || 'archivo';
+    const keyCategoria= findKey(sample, ['categoria', 'category', 'tipo', 'grupo']); // opcional
 
-  if (abrir) { abrir.style.display = 'inline-block'; abrir.href = url; }
-  if (down)  { down.style.display  = 'inline-block'; down.href  = url; }
+    log('Columnas detectadas =>', { keySAP, keyArchivo, keyCategoria });
 
-  setText('visorMsg', `Archivo listo: ${url}`);
-}
+    // Validación mínima
+    if (!sample[keySAP] || !sample[keyArchivo]) {
+      // No rompo: explico y salgo con error claro
+      throw new Error(
+        'No se detectaron columnas mínimas. ' +
+        'Se necesita una columna de SAP y una de ARCHIVO/PDF en la primera fila de encabezados.'
+      );
+    }
 
-function limpiarVisor(msg = 'Sin resultados todavía.') {
-  const abrir = $('btnAbrirNueva');
-  const down  = $('btnDescargar');
-  if (abrir) abrir.style.display = 'none';
-  if (down)  down.style.display  = 'none';
-  setText('visorMsg', msg);
-}
+    // Normalizo dataset
+    const data = rows
+      .map(r => ({
+        sap:       normSap(r[keySAP]),
+        categoria: keyCategoria ? String(r[keyCategoria] || '').trim() : '',
+        archivo:   String(r[keyArchivo] || '').trim()
+      }))
+      .filter(r => r.sap && r.archivo);
 
-// ===============================
-//  Búsqueda por SAP + categoría
-// ===============================
-function prepararBuscador(dataset) {
-  const btn = $('btnBuscar');
-  const inp = $('inputSap');
-  const sel = $('selectCategoria');
+    // Categorías únicas (si hay)
+    const categorias = Array.from(new Set(data.map(r => r.categoria).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b));
 
-  if (!btn || !inp) {
-    warn('Faltan #btnBuscar y/o #inputSap');
-    return;
+    setText('estado', 'Datos cargados correctamente.');
+    return { data, categorias };
   }
 
-  btn.onclick = () => {
-    limpiarVisor();
+  // ---------- Render categorías ----------
+  function renderCategorias(categorias) {
+    const sel = $('selectCategoria');
+    if (!sel) return; // tolerante si no existe
 
-    const sap = norm(inp.value);
-    const cat = sel ? String(sel.value).trim() : '';
+    // Limpio
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = '—';
+    sel.appendChild(opt0);
 
-    if (!sap) { setText('visorMsg', 'Ingresa un código SAP.'); return; }
+    categorias.forEach(c => {
+      const op = document.createElement('option');
+      op.value = c;
+      op.textContent = c;
+      sel.appendChild(op);
+    });
+  }
 
-    // Filtrado
-    let candidatos = dataset.data.filter(r => r.sap === sap);
-    if (cat) candidatos = candidatos.filter(r => r.categoria === cat);
+  // ---------- Buscar / Mostrar resultado ----------
+  function mostrarResultado(pdfUrl) {
+    const visorMsg = $('visorMsg');
+    const btnNueva = $('btnAbrirNueva');
+    const btnDesc  = $('btnDescargar');
 
-    if (!candidatos.length) {
-      setText('visorMsg', 'No se encontraron coincidencias.');
+    if (!visorMsg) return; // tolerante
+
+    if (pdfUrl) {
+      visorMsg.textContent = 'Documento encontrado.';
+      if (btnNueva) { btnNueva.href = pdfUrl; show('btnAbrirNueva'); }
+      if (btnDesc)  { btnDesc.href  = pdfUrl; show('btnDescargar'); }
+    } else {
+      visorMsg.textContent = 'Sin resultados.';
+      if (btnNueva) hide('btnAbrirNueva');
+      if (btnDesc)  hide('btnDescargar');
+    }
+  }
+
+  function buscarPDF(data) {
+    const input = $('inputSap');
+    if (!input) return;
+
+    const sap = normSap(input.value);
+    if (!sap) {
+      mostrarResultado(''); // nada que buscar
       return;
     }
 
-    const archivo = candidatos[0].archivo;
-    if (!archivo.toLowerCase().endsWith('.pdf')) {
-      warn('El archivo no parece PDF:', archivo);
+    const categoriaSel = $('selectCategoria') ? $('selectCategoria').value : '';
+
+    // Filtro por SAP y (si se eligió) por categoría
+    const candidatos = data.filter(r =>
+      r.sap === sap && (!categoriaSel || r.categoria === categoriaSel)
+    );
+
+    if (!candidatos.length) {
+      mostrarResultado('');
+      return;
     }
 
-    const url = joinPdfUrl(PDF_BASE, archivo);
+    // Tomo el primero
+    const archivo = candidatos[0].archivo;
+    const url = (archivo.startsWith('http://') || archivo.startsWith('https://'))
+      ? archivo
+      : (PDF_BASE.replace(/\/+$/, '') + '/' + archivo.replace(/^\/+/, ''));
+
     mostrarResultado(url);
-  };
-}
-
-// ===============================
-//  Init
-// ===============================
-async function init() {
-  try {
-    setText('estado', 'Cargando…');           // seguro (no falla si falta)
-    setText('excelRemoto', URL_EXCEL);
-    setText('pdfsRemotos', PDF_BASE);
-
-    const dataset = await cargarExcel();
-    llenarCategorias(dataset.categorias);
-    prepararBuscador(dataset);
-  } catch (err) {
-    warn('Error en init:', err);
-    setText('estado', `Error al cargar datos: ${err.message || err}`);
-    limpiarVisor('No hay datos para buscar.');
   }
 
-  const btnRe = $('btnReintentar');
-  if (btnRe) btnRe.onclick = init;
-}
+  // ---------- Init ----------
+  async function init() {
+    try {
+      setText('estado', 'Cargando…');
 
-// Ejecuta cuando el DOM está listo (por si alguien quita "defer")
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
+      // Muestro rutas (si hay spans)
+      setText('excelRemoto', URL_EXCEL);
+      setText('pdfsRemotos', PDF_BASE);
+
+      const { data, categorias } = await cargarExcel();
+      window._DATA = data; // útil para depurar
+
+      renderCategorias(categorias);
+      setText('estado', 'Datos cargados correctamente.');
+      log('Registros:', data.length, 'Categorías:', categorias.length);
+    } catch (e) {
+      setText('estado', 'Error: ' + e.message);
+      err(e);
+    }
+  }
+
+  // ---------- Eventos ----------
+  function bindEvents() {
+    const btnReintentar = $('btnReintentar');
+    if (btnReintentar) btnReintentar.addEventListener('click', init);
+
+    const btnBuscar = $('btnBuscar');
+    if (btnBuscar) btnBuscar.addEventListener('click', () => buscarPDF(window._DATA || []));
+
+    const sel = $('selectCategoria');
+    if (sel) sel.addEventListener('change', () => buscarPDF(window._DATA || []));
+  }
+
+  // ---------- Arranque ----------
+  bindEvents();
   init();
-}
+})();

@@ -1,221 +1,209 @@
-// --- app.js (al inicio) ---
-async function ensureXLSX() {
-  if (window.XLSX) return window.XLSX;
+/* app.js - versión robusta (GitHub Raw) */
 
-  // Espera hasta 5s a que la librería aparezca
-  await new Promise((resolve, reject) => {
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (window.XLSX) {
-        clearInterval(timer);
-        resolve();
-      } else if (Date.now() - started > 5000) {
-        clearInterval(timer);
-        reject(new Error('XLSX no cargó en tiempo'));
+(() => {
+  const $ = (sel) => document.querySelector(sel);
+
+  const elEstado   = $("#estado");
+  const elExcelRem = $("#excelRemoto");
+  const elPdfsRem  = $("#pdfsRemotos");
+
+  const elSelectCat = $("#selectCategoria");
+  const elInputSap  = $("#inputSap");
+  const elBtnBuscar = $("#btnBuscar");
+  const elBtnRetry  = $("#btnReintentar");
+
+  const elVisorMsg  = $("#visorMsg");
+  const elAbrir     = $("#btnAbrirNueva");
+  const elDesc      = $("#btnDescargar");
+
+  // Expuestas por env-gh.js (ya comprobamos que están bien)
+  const URL_EXCEL = window.URL_EXCEL;
+  const PDF_BASE  = window.PDF_BASE;
+
+  // Estado en memoria
+  let rows = [];           // filas puras (sin encabezado)
+  let headers = [];        // encabezados normalizados
+  let data = [];           // [{sap, categoria, archivo}]
+  let categorias = [];     // únicas
+
+  // Normaliza texto: trim, lower, sin acentos
+  const normalize = (s) =>
+    (s == null ? "" : String(s))
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu,"");
+
+  function logStatus(msg, ok=true){
+    elEstado.textContent = msg;
+    elEstado.style.color = ok ? "#16a34a" : "#b91c1c";
+  }
+
+  function showInfoPaths(){
+    // Solo para UI informativa, ya lo venías mostrando
+    if (elExcelRem) elExcelRem.textContent = URL_EXCEL || "(sin URL_EXCEL)";
+    if (elPdfsRem)  elPdfsRem.textContent  = PDF_BASE  || "(sin PDF_BASE)";
+  }
+
+  // Detecta índices de columnas en el header
+  function detectarColumnas(hdrs) {
+    // Mientras más patrones, mejor tolerante
+    const idxSAP = hdrs.findIndex(h =>
+      ["sap", "codigo", "codigosap", "id"].some(p => h === p || h.includes(p))
+    );
+
+    const idxCategoria = hdrs.findIndex(h =>
+      ["categoria", "categoría", "category", "tipo", "grupo"].some(p => h.includes(p))
+    );
+
+    const idxArchivo = hdrs.findIndex(h =>
+      ["archivo", "pdf", "file", "documento", "nombre"].some(p => h.includes(p))
+    );
+
+    return { idxSAP, idxCategoria, idxArchivo };
+  }
+
+  async function cargarExcel() {
+    try {
+      logStatus("Cargando Excel desde GitHub Raw…", true);
+      const res = await fetch(URL_EXCEL, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} al cargar Excel`);
+      const ab = await res.arrayBuffer();
+
+      // XLSX debe existir (lo cargas en index antes de app.js)
+      const wb = XLSX.read(ab, { type: "array" });
+
+      // Toma la primera hoja no vacía (o la primera si te sirve)
+      const sheetNames = wb.SheetNames;
+      let ws;
+      let pickedName = "";
+
+      for (const name of sheetNames) {
+        const tmp = wb.Sheets[name];
+        const r = XLSX.utils.sheet_to_json(tmp, { header: 1, defval: "" });
+        if (Array.isArray(r) && r.length > 0) {
+          ws = tmp;
+          pickedName = name;
+          break;
+        }
       }
-    }, 50);
-  });
+      if (!ws) throw new Error("No se encontró una hoja válida en el Excel");
 
-  return window.XLSX;
-}
+      const r = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+      if (!Array.isArray(r) || r.length < 2) {
+        throw new Error("El Excel no tiene filas suficientes (necesita encabezado + datos)");
+      }
 
-// --------------------------- utilidades DOM ---------------------------
-const $id = (id) => document.getElementById(id) || null;
+      const rawHeaders = r[0].map(x => String(x));
+      headers = rawHeaders.map(normalize);
+      rows = r.slice(1); // sin encabezado
 
-// Intenta mapear ids comunes; ajusta aquí si tus ids difieren
-const els = {
-  // Bloque "estado de datos"
-  statusBox:       $id('statusBox') || $id('statusText'),
-  btnRetry:        $id('btnRetry') || $id('btnReload') || $id('btnReintentar'),
-  excelRemoteOut:  $id('txtExcelRemote') || $id('excelRemote') || $id('excelStatus'),
-  pdfBaseOut:      $id('txtPdfBase') || $id('pdfBaseOut') || $id('statusPdfsBase'),
-  loadingLabel:    $id('loadingLabel'),
+      console.log("[app] Hoja usada:", pickedName);
+      console.log("[app] Encabezados brutos:", rawHeaders);
+      console.log("[app] Encabezados normalizados:", headers);
 
-  // Buscar por SAP
-  inputSAP:        $id('inputSap') || $id('sapInput') || $id('txtSAP'),
-  selectCategoria: $id('selectCategoria') || $id('categorySelect'),
-  btnBuscar:       $id('btnBuscar') || $id('btnSearch'),
+      const { idxSAP, idxCategoria, idxArchivo } = detectarColumnas(headers);
+      console.log("[app] idxSAP / idxCategoria / idxArchivo =>", idxSAP, idxCategoria, idxArchivo);
 
-  // Resultados
-  linkOpen:        $id('openLink') || $id('linkOpen') || $id('abrirNueva'),
-  linkDownload:    $id('downloadLink') || $id('linkDownload') || $id('descargar'),
+      if (idxSAP === -1 || idxCategoria === -1 || idxArchivo === -1) {
+        logStatus("No se encontraron columnas SAP/Categoria/Archivo en el Excel.", false);
+        console.warn(
+          "[app] Columnas requeridas no detectadas. " +
+          "Asegúrate de tener columnas tipo: SAP | Categoria | Archivo (nombres tolerantes)."
+        );
+        return;
+      }
 
-  // Informativo (opcional)
-  sourceNote:      $id('sourceNote'),
-};
+      // Construye dataset limpio
+      data = rows
+        .map((row) => {
+          const sap = String(row[idxSAP] ?? "").trim();
+          const cat = String(row[idxCategoria] ?? "").trim();
+          const arc = String(row[idxArchivo] ?? "").trim();
+          return { sap, categoria: cat, archivo: arc };
+        })
+        .filter(item => item.archivo && item.categoria); // al menos estos 2
 
-// --------------------------- estado de datos ---------------------------
-let _rows         = [];        // filas crudas del Excel (como objetos)
-let _bySAP        = new Map(); // Map<SAP, Array<row>>
-let _categorias   = new Set(); // Set con categorías únicas
+      // Categorías únicas
+      const setCat = new Set(data.map(d => d.categoria).filter(Boolean));
+      categorias = [...setCat].sort((a,b) => a.localeCompare(b, "es"));
 
-// Columnas aceptadas (flexibles por distintos nombres)
-const COLNAMES = {
-  sap:       ['sap','codigo','cod_sap','sap_code','id','idsap','c_sap'],
-  categoria: ['categoria','categoría','category','grupo','familia','clase'],
-  archivo:   ['archivo','pdf','file','filename','nombre','nombrepdf']
-};
+      // Llena el combo
+      llenarCategorias();
 
-function pick(obj, aliases) {
-  const keys = Object.keys(obj);
-  const low  = keys.reduce((acc,k) => (acc[k.toLowerCase()] = k, acc), {});
-  for (const a of aliases) {
-    if (low[a]) return obj[ low[a] ];
-  }
-  return '';
-}
+      logStatus("Datos cargados correctamente.");
+      console.log("[app] Filas de datos:", data.length);
+      console.log("[app] Categorías:", categorias);
 
-function limpiarNombrePDF(nombre) {
-  if (!nombre) return '';
-  let n = String(nombre).trim();
-  // Si trae rutas tipo "pdfs/archivo.pdf" o "/pdfs/archivo.pdf", recorta directorios
-  n = n.replace(/^.*[\\/]/,'');
-  // Asegura extensión .pdf
-  if (!/\.pdf$/i.test(n)) n += '.pdf';
-  return n;
-}
-
-// --------------------------- carga del Excel ---------------------------
-async function cargarExcel() {
-  try {
-    actualizarEstado('Cargando datos…');
-
-    if (els.excelRemoteOut) els.excelRemoteOut.textContent = window.URL_EXCEL || '';
-    if (els.pdfBaseOut)     els.pdfBaseOut.textContent     = window.PDF_BASE || '';
-
-    // fetch RAW Excel
-    const resp = await fetch(window.URL_EXCEL, { cache: 'no-store' });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-    const ab = await resp.arrayBuffer();
-    const wb = XLSX.read(ab, { type: 'array' });
-
-    // Tomamos la primera hoja
-    const wsName = wb.SheetNames[0];
-    const ws     = wb.Sheets[wsName];
-
-    const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
-    _rows = json;
-
-    indexarDatos(json);
-
-    actualizarEstado('Datos cargados correctamente.');
-    if (els.sourceNote) els.sourceNote.textContent = 'Leyendo desde GitHub Raw';
-  } catch (err) {
-    console.error('[app] Error cargando Excel', err);
-    actualizarEstado(`Error al cargar Excel: ${err.message || err}`, true);
-  }
-}
-
-function indexarDatos(filas) {
-  _bySAP.clear();
-  _categorias.clear();
-
-  filas.forEach((r) => {
-    const sap   = String(pick(r, COLNAMES.sap)).trim();
-    const cat   = String(pick(r, COLNAMES.categoria)).trim();
-    const arch  = limpiarNombrePDF( pick(r, COLNAMES.archivo) );
-
-    if (sap) {
-      const obj = { sap, categoria: cat, archivo: arch, raw: r };
-      if (!_bySAP.has(sap)) _bySAP.set(sap, []);
-      _bySAP.get(sap).push(obj);
+    } catch (err) {
+      logStatus(`Error al cargar Excel: ${err.message}`, false);
+      console.error("[app] Error cargando Excel:", err);
     }
-    if (cat) _categorias.add(cat);
-  });
+  }
 
-  // Refresca el combo de categorías
-  if (els.selectCategoria) {
-    const prev = els.selectCategoria.value || '';
-    els.selectCategoria.innerHTML = '';
-    const opt0 = document.createElement('option');
-    opt0.value = ''; opt0.textContent = '—';
-    els.selectCategoria.appendChild(opt0);
-
-    Array.from(_categorias).sort().forEach((c) => {
-      const op = document.createElement('option');
-      op.value = c; op.textContent = c;
-      els.selectCategoria.appendChild(op);
+  function llenarCategorias() {
+    // Limpia el select (mantiene la opción “—”)
+    while (elSelectCat.options.length > 1) elSelectCat.remove(1);
+    categorias.forEach(cat => {
+      const opt = document.createElement("option");
+      opt.value = cat;
+      opt.textContent = cat;
+      elSelectCat.appendChild(opt);
     });
+  }
 
-    // si había una seleccionada, intenta respetarla
-    if ([...els.selectCategoria.options].some(o => o.value === prev)) {
-      els.selectCategoria.value = prev;
+  function buscar() {
+    elAbrir.style.display = "none";
+    elDesc.style.display  = "none";
+    elAbrir.href = "#";
+    elDesc.href  = "#";
+
+    const sap = (elInputSap.value || "").trim();
+    const cat = elSelectCat.value;
+
+    if (!sap) {
+      elVisorMsg.textContent = "Ingresa un SAP.";
+      return;
     }
-  }
-}
+    if (!cat) {
+      elVisorMsg.textContent = "Selecciona una categoría.";
+      return;
+    }
 
-// --------------------------- búsqueda ---------------------------
-function buscarPDF() {
-  const sap = (els.inputSAP?.value || '').trim();
-  const cat = (els.selectCategoria?.value || '').trim();
+    const res = data.filter(d =>
+      String(d.sap).trim() === sap && String(d.categoria).trim() === cat
+    );
 
-  if (!sap) {
-    alert('Ingresa un código SAP.');
-    return;
-  }
-  if (!_bySAP.size) {
-    alert('Aún no hay datos cargados.');
-    return;
-  }
+    if (!res.length) {
+      elVisorMsg.textContent = "Sin resultados para ese SAP y categoría.";
+      return;
+    }
 
-  const lista = _bySAP.get(sap);
-  if (!lista || !lista.length) {
-    actualizarEstado(`No se encontraron PDFs para SAP ${sap}.`, true);
-    setResultado(null);
-    return;
-  }
+    const archivo = res[0].archivo;
+    const url = `${PDF_BASE}${encodeURIComponent(archivo)}`;
 
-  // Si hay categoría elegida, filtra; si no, toma la primera
-  let match = lista;
-  if (cat) match = lista.filter(x => (x.categoria || '') === cat);
-
-  if (!match.length) {
-    actualizarEstado(`Sin coincidencias para SAP ${sap} en categoría "${cat}".`, true);
-    setResultado(null);
-    return;
+    elVisorMsg.textContent = `Archivo: ${archivo}`;
+    elAbrir.href = url;
+    elDesc.href  = url;
+    elAbrir.style.display = "inline-block";
+    elDesc.style.display  = "inline-block";
   }
 
-  const elegido = match[0];
-  const urlPDF  = window.PDF_BASE + elegido.archivo;
-
-  setResultado(urlPDF);
-  actualizarEstado(`PDF encontrado para SAP ${sap}${cat ? ` (${cat})` : ''}.`);
-}
-
-function setResultado(url) {
-  if (els.linkOpen) {
-    if (url) { els.linkOpen.href = url; els.linkOpen.classList.remove('disabled'); }
-    else     { els.linkOpen.removeAttribute('href'); els.linkOpen.classList.add('disabled'); }
+  function events(){
+    elBtnBuscar.addEventListener("click", buscar);
+    elBtnRetry?.addEventListener("click", () => {
+      data = []; categorias = []; rows = []; headers = [];
+      llenarCategorias();
+      logStatus("Reintentando…", true);
+      cargarExcel();
+    });
   }
-  if (els.linkDownload) {
-    if (url) { els.linkDownload.href = url; els.linkDownload.download = ''; els.linkDownload.classList.remove('disabled'); }
-    else     { els.linkDownload.removeAttribute('href'); els.linkDownload.removeAttribute('download'); els.linkDownload.classList.add('disabled'); }
+
+  function init(){
+    showInfoPaths();
+    events();
+    cargarExcel();
   }
-}
 
-// --------------------------- UI helpers ---------------------------
-function actualizarEstado(msg, esError = false) {
-  if (els.statusBox) {
-    els.statusBox.textContent = msg;
-    els.statusBox.style.color = esError ? '#b00020' : '#333';
-  } else {
-    console.log('[estado]', msg);
-  }
-}
-
-// --------------------------- eventos ---------------------------
-document.addEventListener('DOMContentLoaded', () => {
-  // Mostrar desde dónde lee
-  if (els.excelRemoteOut) els.excelRemoteOut.textContent = window.URL_EXCEL || '';
-  if (els.pdfBaseOut)     els.pdfBaseOut.textContent     = window.PDF_BASE || '';
-
-  // Botón reintentar
-  if (els.btnRetry) els.btnRetry.addEventListener('click', cargarExcel);
-
-  // Buscar
-  if (els.btnBuscar) els.btnBuscar.addEventListener('click', buscarPDF);
-
-  // Carga inicial
-  cargarExcel();
-});
+  window.addEventListener("DOMContentLoaded", init);
+})();

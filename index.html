@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Biblioteca de PDFs por SAP</title>
+
+  <!-- (Opcional) estilos muy simples -->
+  <style>
+    :root{
+      --ara-red:#ea1d2c; --ara-orange:#ff6a00; --bg:#f7f7f9; --text:#222;
+      --muted:#6b7280; --card:#fff; --border:#e5e7eb;
+    }
+    body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    header{
+      background:linear-gradient(90deg,var(--ara-red),var(--ara-orange));
+      color:#fff;padding:16px 20px;display:flex;align-items:center;gap:12px;
+    }
+    header img{height:28px;width:auto;}
+    h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.2px;}
+    main{max-width:1100px;margin:22px auto;padding:0 14px 60px;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:18px;}
+    .title{font-size:18px;font-weight:700;margin:0 0 14px;}
+    .status{font-size:14px;color:var(--muted);margin:6px 0 12px}
+    .btn{display:inline-block;background:linear-gradient(90deg,var(--ara-orange),var(--ara-red));
+         color:#fff;border:none;border-radius:10px;padding:12px 16px;font-weight:600;cursor:pointer}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+    .muted{color:var(--muted)}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    @media (max-width:900px){.row{grid-template-columns:1fr}}
+    input,select{width:100%;height:40px;border:1px solid var(--border);border-radius:10px;padding:0 10px}
+    .danger{border:1px solid #ef4444;color:#ef4444;font-weight:700;text-align:center;padding:12px;border-radius:10px}
+    .link{color:#0b79d0;text-decoration:none}
+  </style>
+
+  <!-- Librería XLSX para leer el Excel desde GitHub Raw -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- ===========================================================
+       CONFIGURACIÓN DEL REPOSITORIO DE DATOS (GITHUB)
+       *Ajusta GH_OWNER si tu usuario no es exactamente Danray11
+       =========================================================== -->
+  <script>
+    window.ENV = {
+      GH_OWNER:  'Danray11',      // <-- tu usuario u organización de GitHub
+      GH_REPO:   'ara-data',      // repo donde está el Excel/PDFs
+      GH_BRANCH: 'main',          // rama
+      GH_PATH_PDFS:  'pdfs/',     // carpeta PDFs (con barra final)
+      GH_PATH_EXCEL: 'data/Layout.xlsx' // ruta del Excel dentro del repo
+    };
+  </script>
+
+  <!-- Script que construye URL_EXCEL y PDF_BASE en base a window.ENV -->
+  <script src="env-gh.js"></script>
+
+  <!-- Tu lógica principal. Debe poder leer las globals URL_EXCEL y PDF_BASE -->
+  <script defer src="app.js"></script>
+</head>
+<body>
+
+  <header>
+    <img src="Logo_ARA.png" alt="ARA" />
+    <h1>Biblioteca de PDFs por SAP</h1>
+  </header>
+
+  <main>
+    <!-- Estado de datos -->
+    <section class="card">
+      <h2 class="title">Estado de datos en la nube</h2>
+      <div id="estado" class="status">Cargando…</div>
+
+      <!-- Si algo falla, el botón queda en rojo -->
+      <div style="margin-top:6px">
+        <button id="btnReintentar" class="btn" type="button">Reintentar carga</button>
+      </div>
+
+      <div style="margin-top:10px">
+        <span class="muted">Leyendo desde GitHub Raw</span>
+      </div>
+    </section>
+
+    <!-- Administrador: solo UI mínima para que no rompa tu app -->
+    <section class="card">
+      <h2 class="title">Administrador — Cargar local y publicar</h2>
+      <div class="row">
+        <div>
+          <div class="muted">1) Cargar Excel (local)</div>
+          <input type="file" id="fileExcel" accept=".xlsx,.xls" />
+          <div class="status">Excel remoto (solo lectura): <span id="excelRemoto" class="muted"></span></div>
+        </div>
+
+        <div>
+          <div class="muted">2) Seleccionar PDFs (local)</div>
+          <input type="file" id="filePdfs" accept="application/pdf" multiple />
+          <div class="status">Carpeta PDFs remota (solo lectura): <span id="pdfsRemotos" class="muted"></span></div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <button id="btnPublicar" class="btn" type="button" disabled>Publicar en la nube (GitHub)</button>
+        <div class="status muted" style="margin-top:6px">
+          Para publicar por GitHub necesitarás la función serverless con token (lo configuraremos luego).
+        </div>
+      </div>
+    </section>
+
+    <!-- Buscar -->
+    <section class="card">
+      <h2 class="title">Buscar por SAP</h2>
+      <div class="row">
+        <div>
+          <label class="muted">Ingresar SAP</label>
+          <input id="inputSap" placeholder="Ej. 5" />
+        </div>
+        <div>
+          <label class="muted">Seleccionar Categoría</label>
+          <select id="selectCategoria">
+            <option value="">—</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <button id="btnBuscar" class="btn" type="button">Buscar PDF</button>
+      </div>
+    </section>
+
+    <!-- Visor -->
+    <section class="card">
+      <h2 class="title">Visor</h2>
+      <div class="status" id="visorMsg">Sin resultados todavía.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a id="btnAbrirNueva" class="btn" href="#" target="_blank" rel="noopener" style="text-decoration:none;display:none">Abrir en pestaña nueva</a>
+        <a id="btnDescargar" class="btn" href="#" download style="text-decoration:none;display:none">Descargar</a>
+      </div>
+    </section>
+
+  </main>
+</body>
+</html>
+

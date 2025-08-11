@@ -1,4 +1,3 @@
-<script>
 // ================== Utiles ==================
 const norm = (s) => String(s ?? '')
   .trim()
@@ -162,13 +161,11 @@ async function buscarYPintar() {
     console.warn('[app] 404 intentando:', url);
     estado.innerHTML = `No se encontró el PDF en GitHub.<br><code>${url}</code><br>
     Verifica que el archivo exista en <code>pdfs/</code> y que el nombre coincida exactamente (mayúsculas, guiones, espacios).`;
-    // Oculta botones
     document.getElementById('btnAbrirNueva').style.display = 'none';
     document.getElementById('btnDescargar').style.display  = 'none';
     return;
   }
 
-  // Mostrar visor/botones
   document.getElementById('visorMsg').textContent = fileName;
   const aNueva = document.getElementById('btnAbrirNueva');
   const aDesc  = document.getElementById('btnDescargar');
@@ -191,4 +188,3 @@ async function init() {
   document.getElementById('btnBuscar')?.addEventListener('click', buscarYPintar);
 }
 document.addEventListener('DOMContentLoaded', init);
-</script>

@@ -1,10 +1,23 @@
-/* app.js
-   - Carga el Excel (desde window.URL_EXCEL)
-   - Indexa por SAP y por Categoría
-   - Permite buscar un PDF por SAP (y categoría opcional)
-   - Construye URLs de PDF con window.PDF_BASE
-   Requiere: XLSX (xlsx.full.min.js)
-*/
+// --- app.js (al inicio) ---
+async function ensureXLSX() {
+  if (window.XLSX) return window.XLSX;
+
+  // Espera hasta 5s a que la librería aparezca
+  await new Promise((resolve, reject) => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (window.XLSX) {
+        clearInterval(timer);
+        resolve();
+      } else if (Date.now() - started > 5000) {
+        clearInterval(timer);
+        reject(new Error('XLSX no cargó en tiempo'));
+      }
+    }, 50);
+  });
+
+  return window.XLSX;
+}
 
 // --------------------------- utilidades DOM ---------------------------
 const $id = (id) => document.getElementById(id) || null;

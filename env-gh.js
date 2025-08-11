@@ -1,51 +1,32 @@
 // env-gh.js
 (function () {
-  try {
-    var ENV = window.ENV || {};
-    var owner     = ENV.GH_OWNER;
-    var repo      = ENV.GH_REPO;
-    var branch    = ENV.GH_BRANCH;
-    var pathPdfs  = ENV.GH_PATH_PDFS || '';
-    var pathExcel = ENV.GH_PATH_EXCEL || '';
+  const ENV = window.ENV || {};
+  const OWNER  = ENV.GH_OWNER  || 'Danray11';
+  const REPO   = ENV.GH_REPO   || 'ara-data';
+  const BRANCH = ENV.GH_BRANCH || 'main';
+  const PATH_XLSX = (ENV.GH_PATH_EXCEL || 'data/Layout.xlsx').replace(/^\/+/, '');
+  const PATH_PDFS = (ENV.GH_PATH_PDFS  || 'pdfs/').replace(/^\/+/, '').replace(/\/+$/, '') + '/';
 
-    if (!owner || !repo || !branch) {
-      console.warn('[env-gh] ENV incompleta. Define GH_OWNER, GH_REPO y GH_BRANCH en window.ENV.');
-      return;
-    }
+  // RAW para Excel
+  const RAW_BASE   = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/`;
+  // MEDIA para PDFs (sirve binarios bajo Git LFS)
+  const MEDIA_BASE = `https://media.githubusercontent.com/media/${OWNER}/${REPO}/${BRANCH}/`;
 
-    // Normalizadores simples
-    function norm(p) { return (p || '').replace(/^\/+/, ''); }            // quita / iniciales
-    function trail(p) { return /\/$/.test(p) ? p : (p + '/'); }           // asegura / final
+  // Expone URLs globales
+  window.URL_EXCEL = RAW_BASE + PATH_XLSX;
+  window.PDF_BASE  = MEDIA_BASE + PATH_PDFS;
 
-    // Bases para cada tipo de recurso
-    var RAW_BASE   = 'https://raw.githubusercontent.com/' +
-                     owner + '/' + repo + '/' + branch + '/';
+  // (opcional) Mostrar en UI
+  const setTxt = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = v;
+  };
+  setTxt('excelRemoto', window.URL_EXCEL);
+  setTxt('pdfsRemotos', window.PDF_BASE);
 
-    // Para archivos bajo Git-LFS (PDFs) usar media.githubusercontent.com
-    var MEDIA_BASE = 'https://media.githubusercontent.com/media/' +
-                     owner + '/' + repo + '/' + branch + '/';
-
-    // Rutas finales que usará la app
-    window.URL_EXCEL = RAW_BASE   + norm(pathExcel);          // Excel por raw
-    window.PDF_BASE  = MEDIA_BASE + trail(norm(pathPdfs));    // PDFs por media (LFS)
-
-    // Útil para depurar/mostrar en UI
-    window.DATA_REPO = {
-      RAW_BASE,
-      MEDIA_BASE,
-      EXCEL: window.URL_EXCEL,
-      PDF_BASE: window.PDF_BASE,
-      OWNER: owner,
-      REPO: repo,
-      BRANCH: branch
-    };
-
-    // Logs informativos
-    console.log('[env-gh] RAW_BASE   =>', RAW_BASE);
-    console.log('[env-gh] MEDIA_BASE =>', MEDIA_BASE);
-    console.log('[env-gh] URL_EXCEL  =>', window.URL_EXCEL);
-    console.log('[env-gh] PDF_BASE   =>', window.PDF_BASE);
-  } catch (err) {
-    console.error('[env-gh] Error:', err);
-  }
+  // Logs útiles
+  console.log('[env-gh] RAW_BASE   =>', RAW_BASE);
+  console.log('[env-gh] MEDIA_BASE =>', MEDIA_BASE);
+  console.log('[env-gh] URL_EXCEL  =>', window.URL_EXCEL);
+  console.log('[env-gh] PDF_BASE   =>', window.PDF_BASE);
 })();

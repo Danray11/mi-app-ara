@@ -1,45 +1,51 @@
-/* env-gh.js
-   Lee window.ENV (definida en index.html) y expone:
-   - window.URL_EXCEL  -> URL cruda al Excel en GitHub
-   - window.PDF_BASE   -> Carpeta base (raw) para los PDFs
-   - window.DATA_REPO  -> info útil para depurar
-*/
-
+// env-gh.js
 (function () {
-  const ENV = (window.ENV || {});
-  const { GH_OWNER, GH_REPO, GH_BRANCH, GH_PATH_PDFS, GH_PATH_EXCEL } = ENV;
+  try {
+    var ENV = window.ENV || {};
+    var owner     = ENV.GH_OWNER;
+    var repo      = ENV.GH_REPO;
+    var branch    = ENV.GH_BRANCH;
+    var pathPdfs  = ENV.GH_PATH_PDFS || '';
+    var pathExcel = ENV.GH_PATH_EXCEL || '';
 
-  if (!GH_OWNER || !GH_REPO || !GH_BRANCH) {
-    console.warn('[env-gh] ENV incompleta. Asegúrate de definir GH_OWNER, GH_REPO y GH_BRANCH en window.ENV (index.html).');
-    return;
+    if (!owner || !repo || !branch) {
+      console.warn('[env-gh] ENV incompleta. Define GH_OWNER, GH_REPO y GH_BRANCH en window.ENV.');
+      return;
+    }
+
+    // Normalizadores simples
+    function norm(p) { return (p || '').replace(/^\/+/, ''); }            // quita / iniciales
+    function trail(p) { return /\/$/.test(p) ? p : (p + '/'); }           // asegura / final
+
+    // Bases para cada tipo de recurso
+    var RAW_BASE   = 'https://raw.githubusercontent.com/' +
+                     owner + '/' + repo + '/' + branch + '/';
+
+    // Para archivos bajo Git-LFS (PDFs) usar media.githubusercontent.com
+    var MEDIA_BASE = 'https://media.githubusercontent.com/media/' +
+                     owner + '/' + repo + '/' + branch + '/';
+
+    // Rutas finales que usará la app
+    window.URL_EXCEL = RAW_BASE   + norm(pathExcel);          // Excel por raw
+    window.PDF_BASE  = MEDIA_BASE + trail(norm(pathPdfs));    // PDFs por media (LFS)
+
+    // Útil para depurar/mostrar en UI
+    window.DATA_REPO = {
+      RAW_BASE,
+      MEDIA_BASE,
+      EXCEL: window.URL_EXCEL,
+      PDF_BASE: window.PDF_BASE,
+      OWNER: owner,
+      REPO: repo,
+      BRANCH: branch
+    };
+
+    // Logs informativos
+    console.log('[env-gh] RAW_BASE   =>', RAW_BASE);
+    console.log('[env-gh] MEDIA_BASE =>', MEDIA_BASE);
+    console.log('[env-gh] URL_EXCEL  =>', window.URL_EXCEL);
+    console.log('[env-gh] PDF_BASE   =>', window.PDF_BASE);
+  } catch (err) {
+    console.error('[env-gh] Error:', err);
   }
-
-  // Base Raw en GitHub
-  const RAW_BASE = `https://raw.githubusercontent.com/${GH_OWNER}/${GH_REPO}/${GH_BRANCH}/`;
-
-  // Normaliza rutas (quita barras iniciales múltiples)
-  const norm = (p) => (p || '').replace(/^\/+/, '');
-
-  // Construye URLs finales
-  const URL_EXCEL = RAW_BASE + norm(GH_PATH_EXCEL || 'data/Layout.xlsx');
-  const PDF_BASE  = RAW_BASE + norm(GH_PATH_PDFS  || 'pdfs/');
-
-  // Expone globales para app.js
-  window.URL_EXCEL = URL_EXCEL;
-  window.PDF_BASE  = /\/$/.test(PDF_BASE) ? PDF_BASE : (PDF_BASE + '/');
-
-  // Útil para depuración
-  window.DATA_REPO = {
-    RAW_BASE,
-    EXCEL: window.URL_EXCEL,
-    PDF_BASE: window.PDF_BASE,
-    OWNER: GH_OWNER,
-    REPO : GH_REPO,
-    BRANCH: GH_BRANCH
-  };
-
-  // Log informativo
-  console.log('[env-gh] RAW_BASE =>', RAW_BASE);
-  console.log('[env-gh] URL_EXCEL =>', window.URL_EXCEL);
-  console.log('[env-gh] PDF_BASE  =>', window.PDF_BASE);
 })();

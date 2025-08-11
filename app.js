@@ -1,272 +1,174 @@
-// app.js — robusto, local-first para XLSX y con mensajes claros
+// === utilidades de normalización ===
+const norm = (s) => String(s ?? '')
+  .trim()
+  .toUpperCase()
+  .normalize('NFD')                 // separa acentos
+  .replace(/[\u0300-\u036f]/g, '')  // quita acentos
+  .replace(/\s*&\s*/g, ' & ')       // normaliza espacios alrededor de &
+  .replace(/\s+/g, ' ')             // colapsa espacios
+  .replace(/[^\w &-]/g, '');        // limpia raro (deja letras/números/espacio/&/-)
 
-(() => {
-  // ---------- helpers DOM ----------
-  const $ = (sel) => document.querySelector(sel);
-  const estadoEl       = $('#estado');
-  const excelRemotoEl  = $('#excelRemoto');
-  const pdfsRemotosEl  = $('#pdfsRemotos');
-  const selCategoria   = $('#selectCategoria');
-  const inputSap       = $('#inputSap');
-  const btnBuscar      = $('#btnBuscar');
-  const visorMsg       = $('#visorMsg');
-  const btnAbrirNueva  = $('#btnAbrirNueva');
-  const btnDescargar   = $('#btnDescargar');
+const isRowEmpty = (row=[]) => row.every(v => String(v ?? '').trim() === '');
 
-  const setStatus = (msg) => { if (estadoEl) estadoEl.textContent = msg; };
+// === carga Excel desde RAW ===
+async function cargarExcel(url) {
+  console.log('[app] URL_EXCEL =>', url);
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`No se pudo descargar el Excel (${res.status})`);
+  const ab = await res.arrayBuffer();
 
-  const renderRutas = () => {
-    if (excelRemotoEl && window.URL_EXCEL) excelRemotoEl.textContent = window.URL_EXCEL;
-    if (pdfsRemotosEl && window.PDF_BASE)   pdfsRemotosEl.textContent   = window.PDF_BASE;
-  };
+  const wb = XLSX.read(ab, { type: 'array' });
+  const wsName = wb.SheetNames[0];     // primera hoja
+  const ws = wb.Sheets[wsName];
 
-  // ---------- Cargar XLSX: local primero; si falla, prueba 2 CDNs ----------
-  function ensureXLSX() {
-    if (window.XLSX) return Promise.resolve('ya_estaba');
-    return new Promise((resolve, reject) => {
-      const tryLoad = (src, next) => {
-        const s = document.createElement('script');
-        s.src = src;
-        s.async = true;
-        s.onload = () => resolve(src);
-        s.onerror = () => next ? next() : reject(new Error(`No se pudo cargar XLSX desde ${src}`));
-        document.head.appendChild(s);
-      };
+  // matriz de celdas
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
 
-      // 1) local
-      tryLoad('./lib/xlsx.full.min.js', () => {
-        // 2) cdnjs
-        tryLoad('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', () => {
-          // 3) unpkg
-          tryLoad('https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js', null);
-        });
-      });
-    });
+  // encuentra la primera fila no vacía como encabezados
+  let headerRowIdx = rows.findIndex(r => !isRowEmpty(r));
+  if (headerRowIdx < 0) throw new Error('No se encontró ninguna fila con datos en el Excel.');
+
+  const rawHeaders = rows[headerRowIdx];
+  const headers = rawHeaders.map(norm);
+
+  console.log('[app] Hoja =>', wsName);
+  console.log('[app] Fila de encabezados:', headerRowIdx, ' | Encabezados (normalizados):', headers);
+
+  // busca la columna SAP de forma robusta
+  const candidatesSAP = ['SAP', 'COD SAP', 'CODIGO SAP', 'ID SAP'];
+  let sapCol = -1;
+  for (const c of candidatesSAP) {
+    const i = headers.indexOf(norm(c));
+    if (i >= 0) { sapCol = i; break; }
+  }
+  if (sapCol < 0) {
+    throw new Error('No se encontró la columna SAP en los encabezados. Encabezados vistos: ' + JSON.stringify(headers));
   }
 
-  // ---------- Leer el Excel ----------
-  async function leerExcel(url) {
-    const res = await fetch(url, { cache: 'no-cache' });
-    if (!res.ok) throw new Error(`Error HTTP ${res.status} al descargar Excel`);
-    const buf = await res.arrayBuffer();
-    const wb  = XLSX.read(buf, { type: 'array' });
-    const ws  = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', blankrows: false });
-    if (!rows.length) throw new Error('El Excel está vacío o no se pudo leer.');
-    return rows;
+  // detecta columnas de categorías (todas las que no sean claves conocidas)
+  const claveNoCategoria = new Set([
+    norm('REGIÓN'), norm('REGION'),
+    norm('Z'), norm('ZONA'),
+    norm('TIENDA'), norm('SURTIDO'),
+    norm('TIPOLOGIA'), norm('TIPOLOGÍA'),
+    norm('TIPO DE TIENDA POR MÓDULOS ORIGINAL'),
+    norm('TIPO DE TIENDA POR MODULOS ORIGINAL'),
+    norm('SAP')
+  ]);
+
+  const catCols = headers
+    .map((h, idx) => ({ h, idx }))
+    .filter(o => !claveNoCategoria.has(o.h) && o.idx !== sapCol)
+    .map(o => o.idx);
+
+  if (catCols.length === 0) {
+    throw new Error('No se detectaron columnas de categoría. Encabezados vistos: ' + JSON.stringify(headers));
   }
 
-  // ---------- Parseo ----------
-  const norm = (s) => String(s || '').trim().toLowerCase()
-    .normalize('NFD').replace(/\p{Diacritic}/gu, '');
+  // categorías normalizadas (para el <select>)
+  const categorias = catCols.map(i => headers[i]);
+  console.log('[app] Categorías detectadas =>', categorias);
 
-  const indexMap = new Map();   // key: `${sap}|${categoria}`  -> nombreArchivo
-  let categoriasDetectadas = [];
+  // arma el índice { sap: { CATEGORIA: nombrePdf } }
+  const data = [];
+  for (let r = headerRowIdx + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    if (isRowEmpty(row)) continue;
+    const sapVal = String(row[sapCol] ?? '').trim();
+    if (!sapVal) continue;
 
-  function armarIndice(rows) {
-    const header = rows[0];
-    // localizar SAP
-    const sapCol = header.findIndex(h => norm(h) === 'sap');
-    if (sapCol < 0) throw new Error('No se encontró la columna SAP en los encabezados.');
-
-    // localizar columnas de categorías por palabras clave
-    const catCols = [];
-    header.forEach((h, i) => {
-      const nh = norm(h);
-      if (nh.includes('galleta') || nh.includes('panela') || nh.includes('azucar')) {
-        catCols.push(i);
-      }
-    });
-    if (!catCols.length) throw new Error('No se detectaron columnas de categorías (GALLETAS / PANELA & AZÚCAR).');
-
-    categoriasDetectadas = catCols.map(i => String(header[i]).trim());
-
-    indexMap.clear();
-    for (let r = 1; r < rows.length; r++) {
-      const row = rows[r];
-      const sapRaw = row[sapCol];
-      const sap = Number(String(sapRaw || '').replace(/[^\d]/g, ''));
-      if (!sap) continue;
-
-      for (const ci of catCols) {
-        const categoria = String(header[ci]).trim();
-        const nombreArchivo = String(row[ci] || '').trim();
-        if (!nombreArchivo) continue;
-        indexMap.set(`${sap}|${categoria}`, nombreArchivo);
-      }
+    const reg = { SAP: sapVal };
+    for (const ci of catCols) {
+      const catName = headers[ci];
+      reg[catName] = String(row[ci] ?? '').trim();
     }
+    data.push(reg);
   }
 
-  function pintarCategorias() {
-    if (!selCategoria) return;
-    selCategoria.innerHTML = '<option value="">—</option>';
-    for (const cat of categoriasDetectadas) {
-      const opt = document.createElement('option');
-      opt.value = cat;
-      opt.textContent = cat;
-      selCategoria.appendChild(opt);
-    }
+  console.log('[app] Filas útiles:', data.length);
+  return { headers, sapCol, catCols, categorias, data };
+}
+
+// === arma índice y llena el select ===
+let INDICE = null;
+
+function armarIndice(parsed) {
+  const { data, categorias } = parsed;
+
+  // llena el <select> de categorías
+  const sel = document.getElementById('selectCategoria');
+  sel.innerHTML = '';
+  const optEmpty = document.createElement('option');
+  optEmpty.value = '';
+  optEmpty.textContent = '—';
+  sel.appendChild(optEmpty);
+  for (const cat of categorias) {
+    const o = document.createElement('option');
+    o.value = cat;
+    o.textContent = cat;     // ya viene normalizado
+    sel.appendChild(o);
   }
 
-  // ---------- Buscar ----------
-  async function buscarPDF() {
-    visorMsg.textContent = '';
-    btnAbrirNueva.style.display = 'none';
-    btnDescargar.style.display  = 'none';
-
-    const sap = Number(String(inputSap.value || '').replace(/[^\d]/g, ''));
-    const cat = selCategoria.value.trim();
-    if (!sap || !cat) {
-      visorMsg.textContent = 'Ingresa un SAP y elige una categoría.';
-      return;
-    }
-
-    const key = `${sap}|${cat}`;
-    const nombre = indexMap.get(key);
-    if (!nombre) {
-      visorMsg.textContent = `No se encontró PDF para SAP ${sap} en categoría "${cat}".`;
-      return;
-    }
-
-    const file = nombre.toLowerCase().endsWith('.pdf') ? nombre : `${nombre}.pdf`;
-    const base = (window.PDF_BASE || '').replace(/\/+$/, '');
-    const url  = `${base}/${encodeURIComponent(file)}`;
-
-    try {
-      const head = await fetch(url, { method: 'HEAD' });
-      if (!head.ok) throw new Error();
-    } catch {
-      visorMsg.textContent = `No se pudo acceder al PDF: ${file}`;
-      return;
-    }
-
-    visorMsg.textContent = `Archivo encontrado: ${file}`;
-    btnAbrirNueva.href = url;
-    btnDescargar.href  = url;
-    btnAbrirNueva.style.display = 'inline-block';
-    btnDescargar.style.display  = 'inline-block';
-  }
-
-  // ---------- Init ----------
-  async function init() {
-    try {
-      renderRutas();
-      setStatus('Cargando…');
-
-      // Cargar XLSX (local → CDN fallback)
-      await ensureXLSX();
-
-      if (!window.URL_EXCEL || !window.PDF_BASE) {
-        throw new Error('Faltan URL_EXCEL o PDF_BASE (revisa env-gh.js / index.html).');
-      }
-
-      const rows = await leerExcel(window.URL_EXCEL);
-      armarIndice(rows);
-      pintarCategorias();
-
-      setStatus('Datos cargados correctamente.');
-    } catch (err) {
-      console.error('[app] Error en init:', err);
-      setStatus(`Error: ${err.message}`);
+  // índice por SAP
+  const idx = {};
+  for (const row of data) {
+    const sap = row.SAP;
+    if (!idx[sap]) idx[sap] = {};
+    for (const k of Object.keys(row)) {
+      if (k === 'SAP') continue;
+      idx[sap][k] = row[k];
     }
   }
+  INDICE = { categorias, idx };
+  console.log('[app] Índice armado. SAP únicos:', Object.keys(idx).length);
+}
 
-  if (btnBuscar) btnBuscar.addEventListener('click', buscarPDF);
-  init();
-})();
-// ===========================
-// BUSCAR PDF POR SAP/CATEGORÍA
-// ===========================
-(function wireBuscar() {
-  const $sap      = document.getElementById('inputSap');
-  const $cat      = document.getElementById('selectCategoria');
-  const $buscar   = document.getElementById('btnBuscar');
-  const $msg      = document.getElementById('visorMsg');
-  const $abrir    = document.getElementById('btnAbrirNueva');
-  const $desc     = document.getElementById('btnDescargar');
+// === búsqueda y construcción de URL de PDF ===
+function buscarYPintar() {
+  const estado = document.getElementById('estado');
+  const sap = (document.getElementById('inputSap')?.value || '').trim();
+  const cat = document.getElementById('selectCategoria')?.value || '';
 
-  if (!$sap || !$cat || !$buscar || !$msg || !$abrir || !$desc) {
-    console.warn('[buscar] Faltan elementos del DOM. Revisa IDs en index.html');
+  if (!sap || !cat) {
+    estado.textContent = 'Ingrese SAP y seleccione una categoría.';
+    return;
+  }
+  if (!INDICE || !INDICE.idx[sap]) {
+    estado.textContent = `No se encontró información para el SAP ${sap}.`;
+    return;
+  }
+  const fileName = INDICE.idx[sap][cat] || '';
+  if (!fileName) {
+    estado.textContent = `No hay PDF para SAP ${sap} en la categoría ${cat}.`;
     return;
   }
 
-  // Utilidad visual
-  function setMsg(texto, tipo = 'info') {
-    $msg.textContent = texto;
-    $msg.style.color = (tipo === 'error') ? '#b91c1c' : '#374151';
+  // PDF_BASE viene de env-gh.js (Media/LFS)
+  const base = (window.PDF_BASE || '').replace(/\/+$/, '');
+  const url = `${base}/${encodeURIComponent(fileName)}.pdf`;
+  console.log('[app] PDF =>', url);
+
+  // pinta visor/botones
+  document.getElementById('visorMsg').textContent = fileName;
+  const aNueva = document.getElementById('btnAbrirNueva');
+  const aDesc  = document.getElementById('btnDescargar');
+  aNueva.style.display = aDesc.style.display = 'inline-block';
+  aNueva.href = url; aDesc.href = url;
+}
+
+// === init ===
+async function init() {
+  try {
+    document.getElementById('estado').textContent = 'Cargando…';
+    const parsed = await cargarExcel(window.URL_EXCEL);
+    armarIndice(parsed);
+    document.getElementById('estado').textContent = 'Datos cargados correctamente.';
+  } catch (e) {
+    console.error('[app] Error en init:', e);
+    document.getElementById('estado').textContent = `Error: ${e.message}`;
   }
-  function showLinks(url) {
-    $abrir.href = url;
-    $desc.href  = url;
-    $abrir.style.display = 'inline-block';
-    $desc.style.display  = 'inline-block';
-  }
-  function hideLinks() {
-    $abrir.style.display = 'none';
-    $desc.style.display  = 'none';
-  }
 
-  // Click en "Buscar PDF"
-  $buscar.addEventListener('click', async () => {
-    hideLinks();
-
-    // Validaciones básicas
-    const sapVal = parseInt(($sap.value || '').trim(), 10);
-    if (!Number.isFinite(sapVal)) {
-      setMsg('Ingresa un SAP válido (número).', 'error');
-      $sap.focus();
-      return;
-    }
-    const catKey = ($cat.value || '').trim();
-    if (!catKey) {
-      setMsg('Selecciona una categoría.', 'error');
-      $cat.focus();
-      return;
-    }
-
-    if (!Array.isArray(window.DATA_ROWS) || window.DATA_ROWS.length === 0) {
-      setMsg('Aún no se han cargado los datos del Excel. Intenta “Reintentar carga”.', 'error');
-      return;
-    }
-
-    // Busca la fila por SAP (columna “SAP” del Excel)
-    const fila = window.DATA_ROWS.find(r => Number(r['SAP']) === sapVal);
-    if (!fila) {
-      setMsg(`No encontré filas para SAP ${sapVal} en ${window.URL_EXCEL || 'el Excel'}.`, 'error');
-      return;
-    }
-
-    // Toma el nombre del PDF desde la columna de la categoría
-    let nombre = (fila[catKey] || '').toString().trim();
-    if (!nombre) {
-      setMsg(`No hay nombre de archivo en la columna “${catKey}” para SAP ${sapVal}.`, 'error');
-      return;
-    }
-
-    // Asegura extensión .pdf
-    if (!/\.pdf$/i.test(nombre)) {
-      nombre += '.pdf';
-    }
-
-    // Construye la URL remota final
-    // (PDF_BASE ya es algo como: https://raw.githubusercontent.com/Danray11/ara-data/main/pdfs/)
-    const url = window.PDF_BASE + encodeURIComponent(nombre);
-
-    // (Opcional) Verifica que el archivo exista antes de mostrar links
-    try {
-      const head = await fetch(url, { method: 'HEAD' });
-      if (!head.ok) {
-        setMsg(`No se encontró el PDF en la nube: ${url}`, 'error');
-        return;
-      }
-    } catch (e) {
-      console.error('[buscar] Error verificando PDF:', e);
-      setMsg('Error verificando el PDF en la nube. Reintenta.', 'error');
-      return;
-    }
-
-    // Éxito
-    setMsg(`Listo: ${nombre}`);
-    showLinks(url);
-  });
-})();
+  // eventos
+  document.getElementById('btnBuscar')?.addEventListener('click', buscarYPintar);
+}
+document.addEventListener('DOMContentLoaded', init);

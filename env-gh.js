@@ -7,25 +7,18 @@
   const PATH_XLSX = (ENV.GH_PATH_EXCEL || 'data/Layout.xlsx').replace(/^\/+/, '');
   const PATH_PDFS = (ENV.GH_PATH_PDFS  || 'pdfs/').replace(/^\/+/, '').replace(/\/+$/, '') + '/';
 
-  // RAW para Excel
-  const RAW_BASE   = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/`;
-  // MEDIA para PDFs (sirve binarios bajo Git LFS)
+  // Base MEDIA (sirve los binarios LFS)
   const MEDIA_BASE = `https://media.githubusercontent.com/media/${OWNER}/${REPO}/${BRANCH}/`;
 
-  // Expone URLs globales
-  window.URL_EXCEL = RAW_BASE + PATH_XLSX;
+  // ¡IMPORTANTE!: Excel y PDFs desde MEDIA (porque están en LFS)
+  window.URL_EXCEL = MEDIA_BASE + PATH_XLSX;
   window.PDF_BASE  = MEDIA_BASE + PATH_PDFS;
 
-  // (opcional) Mostrar en UI
-  const setTxt = (id, v) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = v;
-  };
+  // Mostrar en UI
+  const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   setTxt('excelRemoto', window.URL_EXCEL);
   setTxt('pdfsRemotos', window.PDF_BASE);
 
-  // Logs útiles
-  console.log('[env-gh] RAW_BASE   =>', RAW_BASE);
   console.log('[env-gh] MEDIA_BASE =>', MEDIA_BASE);
   console.log('[env-gh] URL_EXCEL  =>', window.URL_EXCEL);
   console.log('[env-gh] PDF_BASE   =>', window.PDF_BASE);

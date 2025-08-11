@@ -1,215 +1,177 @@
-/* app.js – versión estable y tolerante
-   - Lee el Excel desde URL_EXCEL (definida en env-gh.js)
-   - Usa encabezados de forma flexible (case-insensitive / sin acentos)
-   - No requiere cambiar tu Excel si ya funcionaba
-   - No rompe si faltan spans opcionales (#estado, #excelRemoto, #pdfsRemotos)
-*/
+// app.js — versión "matricial" (SAP x Categoría -> PDF)
 
 (function () {
-  // ---------- Utilidades UI seguras ----------
-  const $ = (id) => document.getElementById(id) || null;
+  // Helpers DOM
+  const $ = (id) => document.getElementById(id);
   const setText = (id, txt) => { const el = $(id); if (el) el.textContent = txt; };
-  const show = (id) => { const el = $(id); if (el) el.style.display = ''; };
-  const hide = (id) => { const el = $(id); if (el) el.style.display = 'none'; };
 
-  const log = (...a) => console.log('[app]', ...a);
-  const warn = (...a) => console.warn('[app]', ...a);
-  const err = (...a) => console.error('[app]', ...a);
+  // Normaliza clave (quita acentos, espacios y símbolos)
+  const normKey = (s) => (s ?? '')
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
 
-  // ---------- Normalizadores ----------
-  // Normaliza claves (encabezados) para comparar sin acentos/espacios
-  const normKey = (s) =>
-    String(s || '')
-      .toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]+/g, '')
-      .trim();
+  // Normalización del SAP (permite dígitos o alfanumérico simple)
+  const normSap = (v) => (v ?? '').toString().trim().replace(/[^\da-zA-Z]/g, '');
 
-  // Normaliza SAP (deja letras/números)
-  const normSap = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+  // Estado global
+  let MATRIX = [];     // [{ sap: '5', byCat: { 'GALLETAS': '...', 'PANELA & AZÚCAR': '...' } }, ...]
+  let CATEGORIES = []; // ['GALLETAS', 'PANELA & AZÚCAR', ...]
 
-  // ---------- Config que viene de env-gh.js ----------
-  const URL_EXCEL = window.URL_EXCEL || '';
-  const PDF_BASE  = window.PDF_BASE  || '';
+  // Busca la fila de encabezados y columnas SAP + Categorías
+  function detectHeaderRow(matrix) {
+    const MAX_SCAN = Math.min(matrix.length, 40);
+    for (let r = 0; r < MAX_SCAN; r++) {
+      const row = matrix[r] || [];
+      const nkRow = row.map(normKey);
 
-  // Si están los spans, muestro info
-  setText('excelRemoto', URL_EXCEL);
-  setText('pdfsRemotos', PDF_BASE);
+      // Columna SAP
+      const sapCol = nkRow.findIndex(v => v === 'sap');
+      if (sapCol === -1) continue;
 
-  // ---------- Búsqueda tolerante de claves en objetos ----------
-  // Acepta varios alias y no depende de mayúsculas/acentos en el Excel
-  function findKey(obj, aliases) {
-    // Mapa normalizado -> clave real
-    const map = {};
-    Object.keys(obj).forEach(k => { map[normKey(k)] = k; });
-
-    for (const alias of aliases) {
-      const nk = normKey(alias);
-      if (map[nk]) return map[nk];
+      // Categorías: toda celda no vacía y distinta de 'sap' en esa misma fila
+      const catCols = [];
+      for (let c = 0; c < row.length; c++) {
+        const raw = (row[c] ?? '').toString().trim();
+        const nk  = normKey(raw);
+        if (nk && nk !== 'sap') {
+          catCols.push({ name: raw, idx: c });
+        }
+      }
+      if (catCols.length > 0) {
+        return { headerRow: r, sapCol, catCols };
+      }
     }
     return null;
   }
 
-  // ---------- Lectura Excel ----------
   async function cargarExcel() {
-    if (!URL_EXCEL) throw new Error('URL_EXCEL no está definida.');
+    if (!window.URL_EXCEL) throw new Error('URL_EXCEL no está definida.');
 
     setText('estado', 'Cargando…');
 
-    const resp = await fetch(URL_EXCEL, { cache: 'no-store' });
-    if (!resp.ok) throw new Error(`No se pudo obtener el Excel. HTTP ${resp.status}`);
+    const resp = await fetch(window.URL_EXCEL, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`No se pudo descargar Excel. HTTP ${resp.status}`);
 
     const buf = await resp.arrayBuffer();
-    const wb = XLSX.read(buf, { type: 'array' });
+    const wb  = XLSX.read(buf, { type: 'array' });
+    const ws  = wb.Sheets[wb.SheetNames[0]];
 
-    const sheetName = wb.SheetNames[0];
-    const ws = wb.Sheets[sheetName];
+    // Leemos como matriz para poder detectar headers y mapear categoría por columnas
+    const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (!matrix.length) throw new Error('El Excel está vacío.');
 
-    // Leemos a objetos (usa primera fila como encabezados)
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-    log('Filas leídas:', rows.length);
+    const header = detectHeaderRow(matrix);
+    console.log('[app] Encabezados detectados =>', header);
 
-    if (!rows.length) throw new Error('El Excel está vacío.');
-
-    // Intentamos detectar claves con varios alias comunes
-    // (no cambies tu Excel: esto intenta adaptarse a lo que ya tenías)
-    const sample = rows[0];
-    const keySAP      = findKey(sample, ['sap', 'codigo', 'codigosap', 'sku', 'id']) || 'sap';
-    const keyArchivo  = findKey(sample, ['archivo', 'file', 'pdf', 'ruta', 'path', 'nombre', 'nombrearchivo']) || 'archivo';
-    const keyCategoria= findKey(sample, ['categoria', 'category', 'tipo', 'grupo']); // opcional
-
-    log('Columnas detectadas =>', { keySAP, keyArchivo, keyCategoria });
-
-    // Validación mínima
-    if (!sample[keySAP] || !sample[keyArchivo]) {
-      // No rompo: explico y salgo con error claro
-      throw new Error(
-        'No se detectaron columnas mínimas. ' +
-        'Se necesita una columna de SAP y una de ARCHIVO/PDF en la primera fila de encabezados.'
-      );
+    if (!header) {
+      throw new Error('No se encontró fila de encabezados con "SAP" y columnas de categorías (p. ej., GALLETAS, PANELA & AZÚCAR).');
     }
 
-    // Normalizo dataset
-    const data = rows
-      .map(r => ({
-        sap:       normSap(r[keySAP]),
-        categoria: keyCategoria ? String(r[keyCategoria] || '').trim() : '',
-        archivo:   String(r[keyArchivo] || '').trim()
-      }))
-      .filter(r => r.sap && r.archivo);
+    const { headerRow, sapCol, catCols } = header;
 
-    // Categorías únicas (si hay)
-    const categorias = Array.from(new Set(data.map(r => r.categoria).filter(Boolean)))
-      .sort((a, b) => a.localeCompare(b));
+    // Categorías (tal cual aparecen en el Excel, para mostrar en el select)
+    const categorias = catCols.map(c => c.name);
+
+    // Parseo de filas a partir de la fila siguiente al encabezado
+    const rows = [];
+    for (let r = headerRow + 1; r < matrix.length; r++) {
+      const row = matrix[r] || [];
+      const sap = normSap(row[sapCol] ?? '');
+      if (!sap) continue;
+
+      const byCat = {};
+      for (const c of catCols) {
+        const val = (row[c.idx] ?? '').toString().trim();
+        if (val) byCat[c.name] = val; // nombre PDF (sin o con .pdf)
+      }
+      rows.push({ sap, byCat });
+    }
+
+    console.log('[app] Filas leídas:', rows.length, 'Categorías:', categorias);
 
     setText('estado', 'Datos cargados correctamente.');
-    return { data, categorias };
+    return { rows, categorias };
   }
 
-  // ---------- Render categorías ----------
-  function renderCategorias(categorias) {
+  function llenarSelectCategorias(cats) {
     const sel = $('selectCategoria');
-    if (!sel) return; // tolerante si no existe
-
-    // Limpio
-    sel.innerHTML = '';
-    const opt0 = document.createElement('option');
-    opt0.value = '';
-    opt0.textContent = '—';
-    sel.appendChild(opt0);
-
-    categorias.forEach(c => {
-      const op = document.createElement('option');
-      op.value = c;
-      op.textContent = c;
-      sel.appendChild(op);
-    });
+    if (!sel) return;
+    sel.innerHTML = '<option value="">—</option>' +
+      cats.map(name => `<option value="${name}">${name}</option>`).join('');
   }
 
-  // ---------- Buscar / Mostrar resultado ----------
-  function mostrarResultado(pdfUrl) {
-    const visorMsg = $('visorMsg');
-    const btnNueva = $('btnAbrirNueva');
-    const btnDesc  = $('btnDescargar');
-
-    if (!visorMsg) return; // tolerante
-
-    if (pdfUrl) {
-      visorMsg.textContent = 'Documento encontrado.';
-      if (btnNueva) { btnNueva.href = pdfUrl; show('btnAbrirNueva'); }
-      if (btnDesc)  { btnDesc.href  = pdfUrl; show('btnDescargar'); }
-    } else {
-      visorMsg.textContent = 'Sin resultados.';
-      if (btnNueva) hide('btnAbrirNueva');
-      if (btnDesc)  hide('btnDescargar');
-    }
+  function toggleVisorBtns(show) {
+    const a = $('btnAbrirNueva');
+    const d = $('btnDescargar');
+    if (a) a.style.display = show ? 'inline-block' : 'none';
+    if (d) d.style.display = show ? 'inline-block' : 'none';
   }
 
-  function buscarPDF(data) {
-    const input = $('inputSap');
-    if (!input) return;
-
-    const sap = normSap(input.value);
-    if (!sap) {
-      mostrarResultado(''); // nada que buscar
-      return;
-    }
-
-    const categoriaSel = $('selectCategoria') ? $('selectCategoria').value : '';
-
-    // Filtro por SAP y (si se eligió) por categoría
-    const candidatos = data.filter(r =>
-      r.sap === sap && (!categoriaSel || r.categoria === categoriaSel)
-    );
-
-    if (!candidatos.length) {
-      mostrarResultado('');
-      return;
-    }
-
-    // Tomo el primero
-    const archivo = candidatos[0].archivo;
-    const url = (archivo.startsWith('http://') || archivo.startsWith('https://'))
-      ? archivo
-      : (PDF_BASE.replace(/\/+$/, '') + '/' + archivo.replace(/^\/+/, ''));
-
-    mostrarResultado(url);
+  function mostrarArchivo(url, nombre) {
+    $('btnAbrirNueva').href = url;
+    $('btnDescargar').href = url;
+    setText('visorMsg', `Archivo: ${nombre}`);
+    toggleVisorBtns(true);
   }
 
-  // ---------- Init ----------
+  function noResultado(msg) {
+    setText('visorMsg', msg);
+    toggleVisorBtns(false);
+  }
+
+  async function onBuscar() {
+    const sap = normSap($('inputSap').value);
+    const cat = $('selectCategoria').value;
+
+    if (!sap) { alert('Ingresa el SAP.'); return; }
+    if (!cat) { alert('Selecciona la categoría.'); return; }
+
+    const fila = MATRIX.find(r => r.sap === sap);
+    if (!fila) { noResultado(`No se encontró el SAP ${sap}.`); return; }
+
+    let nombre = fila.byCat[cat];
+    if (!nombre) {
+      // por si hay pequeñas diferencias de espacios/acentos en la cabecera
+      const key = Object.keys(fila.byCat).find(k => normKey(k) === normKey(cat));
+      if (key) nombre = fila.byCat[key];
+    }
+
+    if (!nombre) { noResultado('No hay archivo para esa categoría.'); return; }
+
+    const fname = /\.pdf$/i.test(nombre) ? nombre : `${nombre}.pdf`;
+    const url   = (window.PDF_BASE || '') + fname;
+
+    mostrarArchivo(url, fname);
+  }
+
   async function init() {
+    // Mostrar las rutas que vamos a usar
+    if (window.RAW_BASE)  console.log('[env-gh] RAW_BASE  =>', window.RAW_BASE);
+    if (window.URL_EXCEL) console.log('[env-gh] URL_EXCEL =>', window.URL_EXCEL);
+    if (window.PDF_BASE)  console.log('[env-gh] PDF_BASE  =>', window.PDF_BASE);
+
+    setText('excelRemoto', window.URL_EXCEL || '');
+    setText('pdfsRemotos', window.PDF_BASE || '');
+
     try {
-      setText('estado', 'Cargando…');
-
-      // Muestro rutas (si hay spans)
-      setText('excelRemoto', URL_EXCEL);
-      setText('pdfsRemotos', PDF_BASE);
-
-      const { data, categorias } = await cargarExcel();
-      window._DATA = data; // útil para depurar
-
-      renderCategorias(categorias);
-      setText('estado', 'Datos cargados correctamente.');
-      log('Registros:', data.length, 'Categorías:', categorias.length);
-    } catch (e) {
-      setText('estado', 'Error: ' + e.message);
-      err(e);
+      const { rows, categorias } = await cargarExcel();
+      MATRIX = rows;
+      CATEGORIES = categorias;
+      llenarSelectCategorias(categorias);
+    } catch (err) {
+      console.error(err);
+      setText('estado', `Error: ${err.message}`);
     }
+
+    const btnBuscar    = $('btnBuscar');
+    const btnReintento = $('btnReintentar');
+    if (btnBuscar)     btnBuscar.onclick    = onBuscar;
+    if (btnReintento)  btnReintento.onclick = init;
   }
 
-  // ---------- Eventos ----------
-  function bindEvents() {
-    const btnReintentar = $('btnReintentar');
-    if (btnReintentar) btnReintentar.addEventListener('click', init);
-
-    const btnBuscar = $('btnBuscar');
-    if (btnBuscar) btnBuscar.addEventListener('click', () => buscarPDF(window._DATA || []));
-
-    const sel = $('selectCategoria');
-    if (sel) sel.addEventListener('change', () => buscarPDF(window._DATA || []));
-  }
-
-  // ---------- Arranque ----------
-  bindEvents();
-  init();
+  document.addEventListener('DOMContentLoaded', init);
 })();

@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Biblioteca de PDFs por SAP</title>
 
-  <!-- Estilos básicos (opcionales) -->
   <style>
     :root{
       --ara-red:#ea1d2c; --ara-orange:#ff6a00; --bg:#f7f7f9; --text:#222;
@@ -33,29 +32,24 @@
     .link{color:#0b79d0;text-decoration:none}
   </style>
 
-  <!-- ===========================================================
-       CARGA LOCAL DE XLSX (DEBE IR ANTES DE app.js)
-       Archivo en tu repo: /lib/xlsx.full.min.js
-       =========================================================== -->
+  <!-- 1) Cargar XLSX ANTES de app.js -->
   <script src="./lib/xlsx.full.min.js"></script>
 
-  <!-- ===========================================================
-       CONFIGURACIÓN DEL REPOSITORIO DE DATOS (GITHUB)
-       =========================================================== -->
+  <!-- 2) Definir ENV para que env-gh.js construya las URLs -->
   <script>
     window.ENV = {
-      GH_OWNER:  'Danray11',               // tu usuario/organización de GitHub
-      GH_REPO:   'ara-data',               // repo con el Excel y los PDFs
-      GH_BRANCH: 'main',                   // rama
-      GH_PATH_PDFS:  'pdfs/',              // carpeta PDFs (con barra al final)
-      GH_PATH_EXCEL: 'data/Layout.xlsx'    // ruta del Excel
+      GH_OWNER:  'Danray11',
+      GH_REPO:   'ara-data',
+      GH_BRANCH: 'main',
+      GH_PATH_PDFS:  'pdfs/',
+      GH_PATH_EXCEL: 'data/Layout.xlsx'
     };
   </script>
 
-  <!-- Construye URL_EXCEL y PDF_BASE en base a window.ENV -->
+  <!-- Construye window.URL_EXCEL y window.PDF_BASE -->
   <script src="env-gh.js"></script>
 
-  <!-- Lógica principal (después de XLSX y env-gh.js) -->
+  <!-- Tu lógica principal (usa XLSX y las URLs de env-gh) -->
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -78,11 +72,11 @@
       <div style="margin-top:10px">
         <div class="status">Excel remoto: <span id="excelRemoto" class="muted"></span></div>
         <div class="status">Carpeta PDFs base: <span id="pdfsRemotos" class="muted"></span></div>
-        <span class="muted">Leyendo desde GitHub Raw</span>
+        <span class="muted">Leyendo desde GitHub Raw/Media</span>
       </div>
     </section>
 
-    <!-- Administrador (UI mínima, solo lectura remota) -->
+    <!-- Administrador (UI mínima; los spans aquí usan IDs distintos para evitar duplicados) -->
     <section class="card">
       <h2 class="title">Administrador — Cargar local y publicar</h2>
 
@@ -91,7 +85,7 @@
           <div class="muted">1) Cargar Excel (local)</div>
           <input type="file" id="fileExcel" accept=".xlsx,.xls" />
           <div class="status">Excel remoto (solo lectura):
-            <span id="excelRemoto" class="muted"></span>
+            <span id="excelRemotoAdmin" class="muted"></span>
           </div>
         </div>
 
@@ -99,7 +93,7 @@
           <div class="muted">2) Seleccionar PDFs (local)</div>
           <input type="file" id="filePdfs" accept="application/pdf" multiple />
           <div class="status">Carpeta PDFs remota (solo lectura):
-            <span id="pdfsRemotos" class="muted"></span>
+            <span id="pdfsRemotosAdmin" class="muted"></span>
           </div>
         </div>
       </div>
@@ -142,6 +136,21 @@
       </div>
     </section>
   </main>
+
+  <script>
+    // Si quieres mostrar también las rutas en la sección "Administrador"
+    document.addEventListener('DOMContentLoaded', () => {
+      const xr = document.getElementById('excelRemoto');
+      const pr = document.getElementById('pdfsRemotos');
+      const xrA = document.getElementById('excelRemotoAdmin');
+      const prA = document.getElementById('pdfsRemotosAdmin');
+
+      if (xr)  xr.textContent  = window.URL_EXCEL || '';
+      if (pr)  pr.textContent  = window.PDF_BASE  || '';
+      if (xrA) xrA.textContent = window.URL_EXCEL || '';
+      if (prA) prA.textContent = window.PDF_BASE  || '';
+    });
+  </script>
 
 </body>
 </html>

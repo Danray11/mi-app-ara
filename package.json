@@ -1,8 +1,0 @@
-{
-  "name": "mi-app-ara",
-  "version": "1.0.0",
-  "type": "module",
-  "dependencies": {
-    "@netlify/blobs": "^6.2.0"
-  }
-}

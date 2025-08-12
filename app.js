@@ -8,9 +8,9 @@ const norm = (s) => String(s ?? '')
   .replace(/\s+/g, ' ')             // colapsa espacios
   .replace(/[^\w &-]/g, '');        // deja letras/números/espacio/&/-
 
-const isRowEmpty = (row=[]) => row.every(v => String(v ?? '').trim() === '');
+const isRowEmpty = (row = []) => row.every(v => String(v ?? '').trim() === '');
 
-// ================== Cargar Excel ==================
+// ================== Cargar Excel (RAW/MEDIA) ==================
 async function cargarExcel(url) {
   console.log('[app] URL_EXCEL =>', url);
 
@@ -73,8 +73,8 @@ async function cargarExcel(url) {
 
     const reg = { SAP: sapVal };
     for (const ci of catCols) {
-      const catName = headers[ci];                 // nombre normalizado
-      const val = String(row[ci] ?? '').trim();    // valor del PDF (sin .pdf)
+      const catName = headers[ci];                 // nombre normalizado (columna)
+      const val = String(row[ci] ?? '').trim();    // valor: nombre del PDF (sin .pdf o con .pdf)
       reg[catName] = val;
     }
     data.push(reg);
@@ -118,7 +118,7 @@ function armarIndice(parsed) {
   console.log('[app] Índice armado. SAP únicos:', Object.keys(idx).length);
 }
 
-// ================== HEAD helper ==================
+// ================== HEAD helper para verificar existencia ==================
 async function existePDF(url) {
   try {
     const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
@@ -128,15 +128,17 @@ async function existePDF(url) {
   }
 }
 
-// ================== Visor PDFJS (versión fijada) ==================
-// Usamos una versión estable que SÍ incluye /web/viewer.html
-const PDFJS_VIEWER = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/web/viewer.html';
+// ================== Visor PDF embebido ==================
+const PDFJS_VIEWER = 'https://mozilla.github.io/pdf.js/web/viewer.html';
 
 function setPreview(pdfUrl) {
   const cont  = document.getElementById('pdfContainer');
   const frame = document.getElementById('pdfFrame');
   if (!cont || !frame) return;
 
+  // Usamos el visor oficial de Mozilla. IMPORTANTE:
+  // - No incluir ningún <script> de pdfjs en el index para evitar conflictos de versión.
+  // - GitHub Media permite CORS, por lo que el visor puede descargar el PDF sin problema.
   const viewerUrl = `${PDFJS_VIEWER}?file=${encodeURIComponent(pdfUrl)}#zoom=page-width`;
   frame.src = viewerUrl;
   cont.style.display = 'block';
@@ -165,38 +167,34 @@ async function buscarYPintar() {
   }
   if (!/\.pdf$/i.test(fileName)) fileName += '.pdf';
 
-  // Construir URL final (MEDIA evita el .gitattributes Raw + LFS)
+  // Construir URL final (MEDIA — Git LFS)
   const base = (window.PDF_BASE || '').replace(/\/+$/, '');
-  const mediaUrl  = `${base}/${encodeURIComponent(fileName)}`;
+  const url  = `${base}/${encodeURIComponent(fileName)}`;
 
-  // Verificar existencia con HEAD
-  const ok = await existePDF(mediaUrl);
+  // Verificar existencia
+  const ok = await existePDF(url);
   if (!ok) {
-    console.warn('[app] 404 intentando:', mediaUrl);
-    estado.innerHTML = `No se encontró el PDF en GitHub.<br><code>${mediaUrl}</code>`;
+    console.warn('[app] 404 intentando:', url);
+    estado.innerHTML = `No se encontró el PDF en GitHub.<br><code>${url}</code><br>
+    Verifica que el archivo exista en <code>pdfs/</code> y que el nombre coincida exactamente (mayúsculas, guiones, espacios).`;
     document.getElementById('btnAbrirNueva').style.display = 'none';
     document.getElementById('btnDescargar').style.display  = 'none';
+    // ocultar visor si fallo
+    const cont = document.getElementById('pdfContainer');
+    if (cont) cont.style.display = 'none';
     return;
   }
 
-  // Botones
+  // Pintar botones + previsualización
+  document.getElementById('visorMsg').textContent = fileName;
   const aNueva = document.getElementById('btnAbrirNueva');
   const aDesc  = document.getElementById('btnDescargar');
-
-  const viewerUrl = `${PDFJS_VIEWER}?file=${encodeURIComponent(mediaUrl)}`;
-
-  aNueva.href = viewerUrl;
-  aNueva.target = '_blank';
-  aNueva.rel    = 'noopener';
-
-  aDesc.href = mediaUrl;
-  aDesc.removeAttribute('download'); // dejamos que el navegador maneje descarga
-
-  // Vista previa embebida
-  setPreview(mediaUrl);
-
-  document.getElementById('visorMsg').textContent = fileName;
   aNueva.style.display = aDesc.style.display = 'inline-block';
+  aNueva.href = url;
+  aDesc.href  = url;
+  aDesc.download = fileName;
+
+  setPreview(url);                 // <— aquí reactivamos la vista previa estable
   estado.textContent = 'PDF listo.';
 }
 
@@ -206,11 +204,12 @@ async function init() {
     document.getElementById('estado').textContent = 'Cargando…';
     const parsed = await cargarExcel(window.URL_EXCEL);
     armarIndice(parsed);
-    document.getElementById('estado').textContent = 'Datos cargados correctamente.';
+    document.getElementById('estado').textContent = 'PDF listo.';
   } catch (e) {
     console.error('[app] Error en init:', e);
     document.getElementById('estado').textContent = `Error: ${e.message}`;
   }
+
   document.getElementById('btnBuscar')?.addEventListener('click', buscarYPintar);
 }
 document.addEventListener('DOMContentLoaded', init);

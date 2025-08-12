@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Biblioteca de PDFs por SAP</title>
+  <title>App de Layout · Tiendas ARA</title>
 
   <style>
     :root{
@@ -52,9 +52,19 @@
 </head>
 <body>
 
-  <header>
-    <img src="Logo_ARA.png" alt="ARA" />
-    <h1>Biblioteca de PDFs por SAP</h1>
+  header img.logo-ara{
+  height: 44px;          /* antes 28px */
+  width: auto;
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast; /* mejora sutil en algunos navegadores */
+  image-rendering: crisp-edges;
+}
+
+@media (min-width: 900px){
+  header img.logo-ara{ height: 52px; } /* un poco más grande en desktop */
+}
+
+    <h1>App de layout Tiendas ARA</h1>
   </header>
 
   <main>
@@ -128,3 +138,4 @@
 
 </body>
 </html>
+

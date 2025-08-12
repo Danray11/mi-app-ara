@@ -2,11 +2,11 @@
 const norm = (s) => String(s ?? '')
   .trim()
   .toUpperCase()
-  .normalize('NFD')                 // separa acentos
-  .replace(/[\u0300-\u036f]/g, '')  // quita acentos
-  .replace(/\s*&\s*/g, ' & ')       // espacios alrededor de &
-  .replace(/\s+/g, ' ')             // colapsa espacios
-  .replace(/[^\w &-]/g, '');        // deja letras/números/espacio/&/-
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/\s*&\s*/g, ' & ')
+  .replace(/\s+/g, ' ')
+  .replace(/[^\w &-]/g, '');
 
 const isRowEmpty = (row = []) => row.every(v => String(v ?? '').trim() === '');
 
@@ -22,10 +22,8 @@ async function cargarExcel(url) {
   const wsName = wb.SheetNames[0];
   const ws = wb.Sheets[wsName];
 
-  // Matriz cruda
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
 
-  // Primera fila no vacía -> encabezados
   const headerRowIdx = rows.findIndex(r => !isRowEmpty(r));
   if (headerRowIdx < 0) throw new Error('No se encontró ninguna fila con datos.');
   const rawHeaders = rows[headerRowIdx];
@@ -34,7 +32,6 @@ async function cargarExcel(url) {
   console.log('[app] Hoja =>', wsName);
   console.log('[app] Fila de encabezados:', headerRowIdx, '| Encabezados (normalizados):', headers);
 
-  // Ubicar columna SAP con tolerancia
   const candidatesSAP = ['SAP', 'COD SAP', 'CODIGO SAP', 'ID SAP'];
   let sapCol = -1;
   for (const c of candidatesSAP) {
@@ -43,7 +40,6 @@ async function cargarExcel(url) {
   }
   if (sapCol < 0) throw new Error('No se encontró la columna SAP en los encabezados.');
 
-  // Columnas de categoría = todas las que no sean claves conocidas
   const NO_CAT = new Set([
     norm('REGIÓN'), norm('REGION'),
     norm('Z'), norm('ZONA'), norm('TIENDA'),
@@ -53,16 +49,17 @@ async function cargarExcel(url) {
     norm('TIPO DE TIENDA POR MODULOS ORIGINAL'),
     norm('SAP')
   ]);
+
   const catCols = headers
     .map((h, idx) => ({ h, idx }))
     .filter(o => !NO_CAT.has(o.h) && o.idx !== sapCol)
     .map(o => o.idx);
+
   if (!catCols.length) throw new Error('No se detectaron columnas de categoría.');
 
   const categorias = catCols.map(i => headers[i]);
   console.log('[app] Categorías detectadas =>', categorias);
 
-  // Cuerpo de datos
   const data = [];
   for (let r = headerRowIdx + 1; r < rows.length; r++) {
     const row = rows[r] || [];
@@ -73,8 +70,8 @@ async function cargarExcel(url) {
 
     const reg = { SAP: sapVal };
     for (const ci of catCols) {
-      const catName = headers[ci];              // nombre normalizado
-      const val = String(row[ci] ?? '').trim(); // valor del PDF (sin .pdf o con .pdf)
+      const catName = headers[ci];
+      const val = String(row[ci] ?? '').trim();
       reg[catName] = val;
     }
     data.push(reg);
@@ -90,7 +87,6 @@ let INDICE = null;
 function armarIndice(parsed) {
   const { data, categorias } = parsed;
 
-  // Llenar <select>
   const sel = document.getElementById('selectCategoria');
   sel.innerHTML = '';
   const optEmpty = document.createElement('option');
@@ -99,12 +95,11 @@ function armarIndice(parsed) {
   sel.appendChild(optEmpty);
   for (const cat of categorias) {
     const o = document.createElement('option');
-    o.value = cat;      // ya viene normalizado
+    o.value = cat;
     o.textContent = cat;
     sel.appendChild(o);
   }
 
-  // Índice por SAP
   const idx = {};
   for (const row of data) {
     const sap = row.SAP;
@@ -128,18 +123,17 @@ async function existePDF(url) {
   }
 }
 
-// ================== Vista previa nativa ==================
+// ================== Vista previa con PDF.js (unpkg) ==================
+const PDFJS_VIEWER = 'https://unpkg.com/pdfjs-dist@4.4.168/web/viewer.html';
+
 function setPreview(pdfUrl) {
   const cont  = document.getElementById('pdfContainer');
   const frame = document.getElementById('pdfFrame');
   if (!cont || !frame) return;
 
-  // Usar visor PDF nativo del navegador.
-  // Tip: algunos navegadores entienden #zoom=page-width
-  frame.src = `${pdfUrl}#zoom=page-width`;
+  const viewerUrl = `${PDFJS_VIEWER}?file=${encodeURIComponent(pdfUrl)}#zoom=page-width`;
+  frame.src = viewerUrl;
   cont.style.display = 'block';
-
-  // Llevar al visor
   cont.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -158,7 +152,6 @@ async function buscarYPintar() {
     return;
   }
 
-  // Tomar nombre del Excel y asegurar .pdf
   let fileName = INDICE.idx[sap][cat] || '';
   if (!fileName) {
     estado.textContent = `No hay PDF para SAP ${sap} en la categoría ${cat}.`;
@@ -166,11 +159,9 @@ async function buscarYPintar() {
   }
   if (!/\.pdf$/i.test(fileName)) fileName += '.pdf';
 
-  // Construir URL final (desde MEDIA base)
   const base = (window.PDF_BASE || '').replace(/\/+$/, '');
   const url  = `${base}/${encodeURIComponent(fileName)}`;
 
-  // Verificar existencia
   const ok = await existePDF(url);
   if (!ok) {
     console.warn('[app] 404 intentando:', url);
@@ -181,7 +172,6 @@ async function buscarYPintar() {
     return;
   }
 
-  // Pintar visor y botones
   document.getElementById('visorMsg').textContent = fileName;
   const aNueva = document.getElementById('btnAbrirNueva');
   const aDesc  = document.getElementById('btnDescargar');

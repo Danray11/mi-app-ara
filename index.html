@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>App de Layout · Tiendas ARA</title>
+  <title>App de layout Tiendas ARA</title>
 
   <style>
     :root{
@@ -15,7 +15,18 @@
       background:linear-gradient(90deg,var(--ara-red),var(--ara-orange));
       color:#fff;padding:16px 20px;display:flex;align-items:center;gap:12px;
     }
-    header img{height:28px;width:auto;}
+    /* Tamaño del logo más grande y nítido */
+    header img.logo-ara{
+      height:44px;              /* antes 28px */
+      width:auto;
+      object-fit:contain;
+      image-rendering:-webkit-optimize-contrast;
+      image-rendering:crisp-edges;
+    }
+    @media (min-width:900px){
+      header img.logo-ara{ height:52px; } /* un poco más grande en desktop */
+    }
+
     h1{font-size:20px;margin:0;font-weight:700;letter-spacing:.2px;}
     main{max-width:1100px;margin:22px auto;padding:0 14px 60px;}
     .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:18px;}
@@ -52,18 +63,8 @@
 </head>
 <body>
 
-  header img.logo-ara{
-  height: 44px;          /* antes 28px */
-  width: auto;
-  object-fit: contain;
-  image-rendering: -webkit-optimize-contrast; /* mejora sutil en algunos navegadores */
-  image-rendering: crisp-edges;
-}
-
-@media (min-width: 900px){
-  header img.logo-ara{ height: 52px; } /* un poco más grande en desktop */
-}
-
+  <header>
+    <img src="Logo_ARA.png" alt="Tiendas ARA" class="logo-ara" />
     <h1>App de layout Tiendas ARA</h1>
   </header>
 
@@ -113,7 +114,7 @@
         <a id="btnDescargar" class="btn" href="#" download style="text-decoration:none;display:none">Descargar</a>
       </div>
 
-      <!-- Vista previa del PDF (ahora DENTRO de la card Visor) -->
+      <!-- Vista previa del PDF -->
       <div id="pdfContainer" style="display:none; margin-top:12px;">
         <iframe
           id="pdfFrame"

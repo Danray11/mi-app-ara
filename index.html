@@ -28,14 +28,13 @@
     .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     @media (max-width:900px){.row{grid-template-columns:1fr}}
     input,select{width:100%;height:40px;border:1px solid var(--border);border-radius:10px;padding:0 10px}
-    .danger{border:1px solid #ef4444;color:#ef4444;font-weight:700;text-align:center;padding:12px;border-radius:10px}
     .link{color:#0b79d0;text-decoration:none}
   </style>
 
-  <!-- 1) Cargar XLSX ANTES de app.js -->
+  <!-- 1) XLSX ANTES de app.js -->
   <script src="./lib/xlsx.full.min.js"></script>
 
-  <!-- 2) Definir ENV para que env-gh.js construya las URLs -->
+  <!-- 2) ENV para que env-gh.js construya URLs -->
   <script>
     window.ENV = {
       GH_OWNER:  'Danray11',
@@ -46,10 +45,10 @@
     };
   </script>
 
-  <!-- Construye window.URL_EXCEL y window.PDF_BASE -->
+  <!-- Construye window.URL_EXCEL (RAW/MEDIA) y window.PDF_BASE (MEDIA) -->
   <script src="env-gh.js"></script>
 
-  <!-- Tu lógica principal (usa XLSX y las URLs de env-gh) -->
+  <!-- Lógica principal -->
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -73,36 +72,6 @@
         <div class="status">Excel remoto: <span id="excelRemoto" class="muted"></span></div>
         <div class="status">Carpeta PDFs base: <span id="pdfsRemotos" class="muted"></span></div>
         <span class="muted">Leyendo desde GitHub Raw/Media</span>
-      </div>
-    </section>
-
-    <!-- Administrador (UI mínima; los spans aquí usan IDs distintos para evitar duplicados) -->
-    <section class="card">
-      <h2 class="title">Administrador — Cargar local y publicar</h2>
-
-      <div class="row">
-        <div>
-          <div class="muted">1) Cargar Excel (local)</div>
-          <input type="file" id="fileExcel" accept=".xlsx,.xls" />
-          <div class="status">Excel remoto (solo lectura):
-            <span id="excelRemotoAdmin" class="muted"></span>
-          </div>
-        </div>
-
-        <div>
-          <div class="muted">2) Seleccionar PDFs (local)</div>
-          <input type="file" id="filePdfs" accept="application/pdf" multiple />
-          <div class="status">Carpeta PDFs remota (solo lectura):
-            <span id="pdfsRemotosAdmin" class="muted"></span>
-          </div>
-        </div>
-      </div>
-
-      <div style="margin-top:12px">
-        <button id="btnPublicar" class="btn" type="button" disabled>Publicar en la nube (GitHub)</button>
-        <div class="status muted" style="margin-top:6px">
-          Para publicar por GitHub necesitarás la función serverless con token (se configurará aparte).
-        </div>
       </div>
     </section>
 
@@ -137,18 +106,13 @@
     </section>
   </main>
 
+  <!-- Rellena las rutas de la tarjeta de estado -->
   <script>
-    // Si quieres mostrar también las rutas en la sección "Administrador"
     document.addEventListener('DOMContentLoaded', () => {
       const xr = document.getElementById('excelRemoto');
       const pr = document.getElementById('pdfsRemotos');
-      const xrA = document.getElementById('excelRemotoAdmin');
-      const prA = document.getElementById('pdfsRemotosAdmin');
-
-      if (xr)  xr.textContent  = window.URL_EXCEL || '';
-      if (pr)  pr.textContent  = window.PDF_BASE  || '';
-      if (xrA) xrA.textContent = window.URL_EXCEL || '';
-      if (prA) prA.textContent = window.PDF_BASE  || '';
+      if (xr) xr.textContent = window.URL_EXCEL || '';
+      if (pr) pr.textContent = window.PDF_BASE  || '';
     });
   </script>
 

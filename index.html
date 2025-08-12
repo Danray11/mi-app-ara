@@ -49,7 +49,15 @@
     header h1{
       margin:0; font-weight:700; font-size:clamp(16px, 2.2vw, 22px);
       letter-spacing:.2px;
+      flex:1;
     }
+    /* Botón admin discreto */
+    .btn-ghost{
+      background:transparent; color:#fff; border:1px solid rgba(255,255,255,.6);
+      border-radius:10px; padding:6px 10px; cursor:pointer; font-weight:600;
+      opacity:.85;
+    }
+    .btn-ghost:hover{ opacity:1 }
 
     /* Layout principal */
     main{max-width:1100px; margin:20px auto; padding:0 14px 48px;}
@@ -65,6 +73,7 @@
     .title{font-size:clamp(18px,1.9vw,20px); font-weight:700; margin:0 0 12px;}
     .status{font-size:14px; color:var(--muted); margin:6px 0 10px}
     .muted{color:var(--muted)}
+    .hidden{ display:none !important; }
 
     .row{display:grid; grid-template-columns:1fr; gap:12px}
     @media (min-width:900px){
@@ -108,7 +117,6 @@
       #pdfFrame{ min-height:78vh }
     }
 
-    /* Reduce motion */
     @media (prefers-reduced-motion: reduce){
       .btn{ transition:none }
     }
@@ -140,12 +148,14 @@
     <div class="wrap">
       <img class="logo-ara" src="Logo_ARA.png" alt="Logo ARA">
       <h1>App de layout · Tiendas ARA</h1>
+      <!-- Botón admin para mostrar/ocultar la tarjeta de estado -->
+      <button id="btnAdmin" class="btn-ghost" title="Modo administrador">Admin</button>
     </div>
   </header>
 
   <main>
-    <!-- Estado -->
-    <section class="card">
+    <!-- ESTADO (oculto por defecto; visible solo en modo admin) -->
+    <section class="card hidden" id="cardEstado">
       <h2 class="title">Estado de datos en la nube</h2>
       <div id="estado" class="status">Cargando…</div>
 
@@ -189,7 +199,7 @@
         <a id="btnDescargar" class="btn" href="#" download style="text-decoration:none;display:none">Descargar</a>
       </div>
 
-      <!-- Vista previa en la misma card -->
+      <!-- Vista previa en la misma card (PDF.js CDN) -->
       <div id="pdfContainer">
         <iframe
           id="pdfFrame"
@@ -201,8 +211,53 @@
     </section>
   </main>
 
-  <!-- Rellena las rutas bajo “Estado” -->
+  <!-- Admin toggle + Rellenar rutas bajo “Estado” -->
   <script>
+    // ====== Admin: ocultar/mostrar tarjeta de estado ======
+    const ADMIN_CODE = 'ARA-Admin-2025'; // cámbialo cuando quieras
+    const cardEstado = document.getElementById('cardEstado');
+    const btnAdmin   = document.getElementById('btnAdmin');
+
+    const isAdmin    = () => localStorage.getItem('ara:isAdmin') === '1';
+    const setAdmin   = (v) => localStorage.setItem('ara:isAdmin', v ? '1' : '0');
+    const renderAdmin = () => {
+      if (isAdmin()) {
+        cardEstado.classList.remove('hidden');
+        btnAdmin.textContent = 'Admin ✔';
+      } else {
+        cardEstado.classList.add('hidden');
+        btnAdmin.textContent = 'Admin';
+      }
+    };
+
+    btnAdmin.addEventListener('click', () => {
+      if (isAdmin()) {
+        if (confirm('Salir del modo administrador?')) {
+          setAdmin(false);
+          renderAdmin();
+        }
+        return;
+      }
+      const code = prompt('Código administrador:');
+      if (code && code === ADMIN_CODE) {
+        setAdmin(true);
+        renderAdmin();
+      } else if (code !== null) {
+        alert('Código incorrecto');
+      }
+    });
+
+    // Atajo: Alt + Shift + A para abrir prompt admin
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+        btnAdmin.click();
+      }
+    });
+
+    // Render inicial
+    renderAdmin();
+
+    // ====== Rellena rutas informativas (aunque la tarjeta esté oculta) ======
     document.addEventListener('DOMContentLoaded', () => {
       const xr = document.getElementById('excelRemoto');
       const pr = document.getElementById('pdfsRemotos');

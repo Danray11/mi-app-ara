@@ -190,3 +190,17 @@ async function init() {
   document.getElementById('btnBuscar')?.addEventListener('click', buscarYPintar);
 }
 document.addEventListener('DOMContentLoaded', init);
+
+// Visor incrustado usando PDF.js público
+const PDFJS_VIEWER = 'https://mozilla.github.io/pdf.js/web/viewer.html';
+
+function setPreview(pdfUrl) {
+  const cont  = document.getElementById('pdfContainer');
+  const frame = document.getElementById('pdfFrame');
+  if (!cont || !frame) return;
+
+  // Usamos el visor PDF.js y le pasamos la URL del PDF (en GitHub Media)
+  const viewerUrl = `${PDFJS_VIEWER}?file=${encodeURIComponent(pdfUrl)}#zoom=page-width`;
+  frame.src = viewerUrl;
+  cont.style.display = 'block';
+}

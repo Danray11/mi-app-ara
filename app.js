@@ -174,6 +174,8 @@ async function buscarYPintar() {
   estado.textContent = 'PDF listo.';
 }
 
+setPreview(url);
+
 // ================== Init ==================
 async function init() {
   try {
